@@ -66,6 +66,7 @@ MIGRATIONS = [
     ("users", "username", "username TEXT"),
     ("users", "password_hash", "password_hash TEXT"),
     ("files", "deleted_at", "deleted_at REAL"),
+    ("chats", "pinned", "pinned INTEGER NOT NULL DEFAULT 0"),
 ]
 
 _conn: aiosqlite.Connection | None = None
@@ -98,10 +99,11 @@ def _now() -> float:
     return time.time()
 
 
-async def _exec(query: str, params: tuple = ()) -> None:
+async def _exec(query: str, params: tuple = ()):
     async with _lock:
-        await _conn.execute(query, params)
+        cur = await _conn.execute(query, params)
         await _conn.commit()
+        return cur
 
 
 async def _fetch(query: str, params: tuple = ()) -> list[dict]:
@@ -175,10 +177,10 @@ async def list_chats(uid: str) -> list[dict]:
     """Диалоги юзера, свежие сверху; last_at — по последнему сообщению."""
     return await _fetch(
         """
-        SELECT c.id, c.title, c.created_at,
+        SELECT c.id, c.title, c.pinned, c.created_at,
                (SELECT MAX(m.created_at) FROM messages m WHERE m.chat_id = c.id) AS last_at
         FROM chats c WHERE c.user_id = ?
-        ORDER BY COALESCE(last_at, c.created_at) DESC
+        ORDER BY c.pinned DESC, COALESCE(last_at, c.created_at) DESC
         """,
         (uid,),
     )
@@ -214,6 +216,32 @@ async def list_messages_full(chat_id: str, limit: int = 200) -> list[dict]:
         "SELECT role, content, created_at FROM messages WHERE chat_id = ? ORDER BY created_at ASC LIMIT ?",
         (chat_id, limit),
     )
+
+
+async def rename_chat(uid: str, chat_id: str, title: str) -> bool:
+    title = title.strip()[:80]
+    if not title:
+        return False
+    cur = await _exec(
+        "UPDATE chats SET title = ? WHERE id = ? AND user_id = ?", (title, chat_id, uid))
+    return cur.rowcount > 0
+
+
+async def set_chat_pinned(uid: str, chat_id: str, pinned: bool) -> bool:
+    cur = await _exec(
+        "UPDATE chats SET pinned = ? WHERE id = ? AND user_id = ?",
+        (1 if pinned else 0, chat_id, uid),
+    )
+    return cur.rowcount > 0
+
+
+async def delete_chat(uid: str, chat_id: str) -> bool:
+    """Диалог + все его сообщения. Файлы юзера не трогаем — они общие."""
+    if not await get_chat(uid, chat_id):
+        return False
+    await _exec("DELETE FROM messages WHERE chat_id = ?", (chat_id,))
+    await _exec("DELETE FROM chats WHERE id = ?", (chat_id,))
+    return True
 
 
 # ---------- files ----------

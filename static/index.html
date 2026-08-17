@@ -576,17 +576,76 @@ async function loadChats(keepCurrent) {
   renderHistory(chats);
 }
 
+let chatsCache = [];
+
 function renderHistory(chats) {
+  chatsCache = chats;
   const nav = document.getElementById('historyList');
   nav.innerHTML = '';
   for (const c of chats) {
-    const b = document.createElement('button');
-    b.className = 'w-full text-left rounded-lg px-3 py-2 text-sm truncate transition ' +
-      (c.id === currentChatId ? 'bg-neutral-200/70 font-medium text-neutral-900' : 'text-neutral-600 hover:bg-neutral-100');
-    b.textContent = c.title;
-    b.title = c.title;
-    b.onclick = () => { if (c.id !== currentChatId) openChat(c.id); };
-    nav.appendChild(b);
+    const active = c.id === currentChatId;
+    const row = document.createElement('div');
+    row.className = 'group relative flex items-center rounded-lg transition ' +
+      (active ? 'bg-neutral-200/70' : 'hover:bg-neutral-100');
+    row.innerHTML = `
+      <button class="chat-open flex-1 min-w-0 flex items-center gap-1.5 text-left px-3 py-2 text-sm truncate ${active ? 'font-medium text-neutral-900' : 'text-neutral-600'}">
+        ${c.pinned ? '<svg class="shrink-0 text-neutral-400" width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M16 3a1 1 0 011.41 0l4.59 4.59a1 1 0 010 1.41l-1.59 1.59-6-6L16 3zM4 20l1.41-4.59L13 8l3 3-7.41 7.59L4 20z"/></svg>' : ''}
+        <span class="truncate">${escapeHtml(c.title)}</span>
+      </button>
+      <button class="chat-menubtn shrink-0 mr-1 p-1 rounded-md text-neutral-400 hover:text-neutral-700 hover:bg-neutral-300/60 transition ${active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}" title="Действия">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
+      </button>
+      <div class="chat-menu hidden absolute right-1 top-9 z-40 w-44 rounded-xl border border-neutral-200 bg-white shadow-lg p-1 text-sm">
+        <button data-act="pin" class="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-neutral-700 hover:bg-neutral-100 transition">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 17v5M9 3h6l1 7 3 3H5l3-3 1-7z"/></svg>
+          ${c.pinned ? 'Открепить' : 'Закрепить'}
+        </button>
+        <button data-act="rename" class="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-neutral-700 hover:bg-neutral-100 transition">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 3a2.8 2.8 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
+          Переименовать
+        </button>
+        <button data-act="delete" class="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-red-600 hover:bg-red-50 transition">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg>
+          Удалить
+        </button>
+      </div>`;
+    row.querySelector('.chat-open').onclick = () => { if (!active) openChat(c.id); };
+    row.querySelector('.chat-open').title = c.title;
+    const menu = row.querySelector('.chat-menu');
+    row.querySelector('.chat-menubtn').onclick = (e) => {
+      e.stopPropagation();
+      document.querySelectorAll('.chat-menu').forEach(m => { if (m !== menu) m.classList.add('hidden'); });
+      menu.classList.toggle('hidden');
+    };
+    menu.querySelector('[data-act="pin"]').onclick = () => chatAction(c.id, 'pin');
+    menu.querySelector('[data-act="rename"]').onclick = () => chatAction(c.id, 'rename');
+    menu.querySelector('[data-act="delete"]').onclick = () => chatAction(c.id, 'delete');
+    nav.appendChild(row);
+  }
+}
+
+document.addEventListener('click', () => {
+  document.querySelectorAll('.chat-menu').forEach(m => m.classList.add('hidden'));
+});
+
+async function chatAction(id, act) {
+  const c = chatsCache.find(x => x.id === id);
+  if (act === 'pin') {
+    await fetch(`/api/chats/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pinned: !(c && c.pinned) }) });
+    loadChats(true);
+  } else if (act === 'rename') {
+    const t = prompt('Название диалога:', c ? c.title : '');
+    if (t && t.trim()) {
+      await fetch(`/api/chats/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: t.trim() }) });
+      loadChats(true);
+    }
+  } else if (act === 'delete') {
+    if (!confirm(`Удалить диалог «${c ? c.title : ''}» вместе со всей историей?`)) return;
+    await fetch(`/api/chats/${id}`, { method: 'DELETE' });
+    if (id === currentChatId) currentChatId = null;
+    loadChats();  // откроет первый оставшийся или создаст новый
   }
 }
 

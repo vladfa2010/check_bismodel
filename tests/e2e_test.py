@@ -153,7 +153,7 @@ def main() -> int:
         # ===== 7. Множественные диалоги =====
         # (victor уже залогинен после сценария 5)
         print("7) Диалоги: создание, история, переключение", flush=True)
-        page.wait_for_selector("#historyList button", timeout=8000)
+        page.wait_for_selector("#historyList .chat-open", timeout=8000)
         check("после входа диалог создан и виден в сайдбаре", True,
               page.inner_text("#historyList"))
 
@@ -163,8 +163,8 @@ def main() -> int:
         page.wait_for_function("document.querySelectorAll('.streamText').length >= 1 && document.querySelector('.streamText').textContent.length > 20", timeout=90000)
         page.wait_for_timeout(1500)  # тайтл обновится после ответа
         page.reload(wait_until="networkidle")
-        page.wait_for_selector("#historyList button", timeout=8000)
-        title1 = page.inner_text("#historyList button >> nth=0")
+        page.wait_for_selector("#historyList .chat-open", timeout=8000)
+        title1 = page.inner_text("#historyList .chat-open >> nth=0")
         check("тайтл первого диалога из первого сообщения", "SaaS" in title1, title1)
 
         page.click("text=Новый чат")
@@ -176,20 +176,48 @@ def main() -> int:
         page.wait_for_selector(".streamText", timeout=90000)
         page.wait_for_timeout(1500)
         page.reload(wait_until="networkidle")
-        page.wait_for_selector("#historyList button", timeout=8000)
-        n = page.locator("#historyList button").count()
+        page.wait_for_selector("#historyList .chat-open", timeout=8000)
+        n = page.locator("#historyList .chat-open").count()
         check("в сайдбаре два диалога", n == 2, f"buttons={n}")
 
-        page.locator("#historyList button").nth(1).click()  # первый (старый) диалог
+        page.locator("#historyList .chat-open").nth(1).click()  # первый (старый) диалог
         page.wait_for_timeout(800)
         body = page.inner_text("#chatContainer")
         check("переключение: в старом диалоге его сообщения", "SaaS" in body and "кофейня" not in body,
               body[:80].replace("\n", " "))
-        page.locator("#historyList button").nth(0).click()  # второй (свежий)
+        page.locator("#historyList .chat-open").nth(0).click()  # второй (свежий)
         page.wait_for_timeout(800)
         body = page.inner_text("#chatContainer")
         check("переключение: в новом диалоге его сообщения", "кофейня" in body and "SaaS" not in body,
               body[:80].replace("\n", " "))
+
+        # ===== 8. Меню «⋯»: переименовать / закрепить / удалить =====
+        print("8) Меню диалога: rename / pin / delete", flush=True)
+        page.on("dialog", lambda d: d.accept("Тестовый диалог"))
+
+        page.locator("#historyList .chat-open").nth(0).hover()
+        page.locator("#historyList .chat-menubtn").nth(0).click()
+        page.wait_for_selector(".chat-menu:not(.hidden)", timeout=3000)
+        check("меню «⋯» открывается", True)
+
+        page.click(".chat-menu:not(.hidden) [data-act='rename']")
+        page.wait_for_timeout(1000)
+        t = page.inner_text("#historyList")
+        check("переименование сохранилось", "Тестовый диалог" in t, t[:60].replace("\n", " "))
+
+        page.locator("#historyList .chat-menubtn").nth(0).click()
+        page.click(".chat-menu:not(.hidden) [data-act='pin']")
+        page.wait_for_timeout(1000)
+        first_title = page.locator("#historyList .chat-open").nth(0).inner_text()
+        first_has_pin = page.locator("#historyList .chat-open svg").count() > 0
+        check("закреплённый поднялся наверх с иконкой", "Тестовый" in first_title and first_has_pin,
+              first_title)
+
+        page.locator("#historyList .chat-menubtn").nth(0).click()
+        page.click(".chat-menu:not(.hidden) [data-act='delete']")
+        page.wait_for_timeout(1200)
+        t = page.inner_text("#historyList")
+        check("диалог удалён", "Тестовый диалог" not in t, t[:60].replace("\n", " "))
 
         browser.close()
 

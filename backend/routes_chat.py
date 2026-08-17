@@ -39,6 +39,30 @@ async def create_chat_ep(request: Request):
     return await db.create_chat(uid)
 
 
+@router.patch("/chats/{chat_id}")
+async def update_chat_ep(chat_id: str, request: Request):
+    """Переименовать или закрепить/открепить диалог."""
+    uid = require_user(request)["id"]
+    body = await request.json()
+    ok = True
+    if "title" in body:
+        ok = await db.rename_chat(uid, chat_id, str(body["title"]))
+    if "pinned" in body:
+        ok = await db.set_chat_pinned(uid, chat_id, bool(body["pinned"])) and ok
+    if not ok:
+        raise HTTPException(404, "Диалог не найден")
+    return {"ok": True}
+
+
+@router.delete("/chats/{chat_id}")
+async def delete_chat_ep(chat_id: str, request: Request):
+    """Удалить диалог вместе с сообщениями (файлы юзера остаются)."""
+    uid = require_user(request)["id"]
+    if not await db.delete_chat(uid, chat_id):
+        raise HTTPException(404, "Диалог не найден")
+    return {"ok": True}
+
+
 @router.get("/chats/{chat_id}/messages")
 async def get_messages_ep(chat_id: str, request: Request):
     """Полная история диалога (только своего)."""
