@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>FinModel AI — прототип</title>
 <script src="https://cdn.tailwindcss.com"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -103,9 +102,7 @@
     </div>
     <div class="px-4 pt-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-neutral-400">История</div>
     <nav class="flex-1 overflow-y-auto px-2 space-y-0.5" id="historyList">
-      <a class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-neutral-600 hover:bg-neutral-200/50 cursor-pointer truncate">SaaS-модель, подписка B2B</a>
-      <a class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-neutral-600 hover:bg-neutral-200/50 cursor-pointer truncate">Кофейня: unit-экономика</a>
-      <a class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-neutral-600 hover:bg-neutral-200/50 cursor-pointer truncate">Маркетплейс, take rate 12%</a>
+      <div class="px-3 py-2 text-xs text-neutral-400">История появится после первых диалогов</div>
     </nav>
     <div class="p-3 border-t border-neutral-200/70">
       <div class="flex items-center gap-2.5 rounded-xl px-2 py-2">
@@ -224,7 +221,6 @@
 let pendingFiles = [];      // {id, name, size, ext, file, status, serverId}
 let fileSeq = 0;
 let busy = false;
-let flowStep = 0;           // scripted demo flow stage
 let realMode = false;       // true, если бэкенд отвечает на /healthz
 let kimiLive = false;       // true, если у бэкенда есть ключ Kimi
 
@@ -393,24 +389,20 @@ function replaceMsg(id, inner) {
 }
 function escapeHtml(s) { return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
-/* ================= scripted AI flow ================= */
+/* ================= отправка сообщения ================= */
 async function sendMessage() {
   const text = input.value.trim();
   if ((!text && pendingFiles.length === 0) || busy) return;
 
+  if (!realMode) {
+    assistantShell(`<p class="text-[15px] text-red-600 leading-relaxed">Сервер недоступен — чат сейчас не работает. Обновите страницу чуть позже.</p>`);
+    return;
+  }
+
   const files = [...pendingFiles];
   pendingFiles = []; renderChips();
   input.value = ''; autoResize();
-
-  if (realMode) { await sendReal(text, files); return; }
-
-  addUserMessage(text, files);
-  busy = true;
-
-  if (flowStep === 0) await runExtractionFlow(text, files);
-  else await runGenericReply(text);
-
-  busy = false;
+  await sendReal(text, files);
 }
 
 /* ================= реальный бэкенд: SSE-стрим ответа ================= */
@@ -556,159 +548,6 @@ async function detectBackend() {
     badge.textContent = 'демо-режим · без бэкенда';
     if (hint) hint.textContent = 'Прототип без бэкенда · ответы ИИ сымитированы · файл модели генерируется настоящий';
   }
-}
-
-async function runExtractionFlow(text, files) {
-  // 1) thinking
-  const t = addTyping();
-  await sleep(1600);
-
-  // 2) extraction report message
-  const fileLine = files.length
-    ? `<p class="text-[15px] leading-relaxed text-neutral-700">Изучил ${files.length === 1 ? 'файл' : 'файла'} <b>${files.map(f=>f.name).join('</b>, <b>')}</b> и ваше описание. Вот что удалось извлечь:</p>`
-    : `<p class="text-[15px] leading-relaxed text-neutral-700">Принял описание. Вот параметры, которые я зафиксировал:</p>`;
-
-  replaceMsg(t, `
-    ${fileLine}
-    <div class="mt-3 rounded-2xl border border-neutral-200 overflow-hidden">
-      <div class="px-4 py-2.5 bg-surface border-b border-neutral-200 text-xs font-semibold uppercase tracking-wider text-neutral-500">Data Extraction Report · черновик</div>
-      <div class="divide-y divide-neutral-100 text-sm">
-        ${paramRow('Модель выручки', 'Подписка: клиенты × ARPU', 'SOURCE', 'из описания')}
-        ${paramRow('ARPU', '12 000 ₽/мес', 'SOURCE', 'из описания')}
-        ${paramRow('Churn', '4% в месяц', 'SOURCE', 'из описания')}
-        ${paramRow('Новые клиенты', '25/мес, рост 10%/мес', 'ASSUMPTION', 'оценка ИИ')}
-        ${paramRow('Налоговый режим', '—', 'MISSING', 'нужен ответ')}
-      </div>
-    </div>
-    <p class="text-[15px] leading-relaxed text-neutral-700 mt-3">Не хватает одного параметра — <b>налоговый режим</b> (УСН 6%, УСН 15% или ОСНО). Могу пока принять УСН 6% как типичный для SaaS. Собирать модель?</p>
-    <div class="flex flex-wrap gap-2 mt-3">
-      <button onclick="buildModel(this)" class="rounded-xl bg-ink text-white text-sm font-medium px-4 py-2 hover:bg-neutral-800 active:scale-[.98] transition">Собрать модель</button>
-      <button onclick="editParams(this)" class="rounded-xl border border-neutral-300 text-sm font-medium px-4 py-2 hover:bg-neutral-50 transition">Поправить параметры</button>
-    </div>
-  `);
-  flowStep = 1;
-}
-
-function paramRow(name, value, status, note) {
-  const badge = {
-    SOURCE:     '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">SOURCE</span>',
-    ASSUMPTION: '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">ASSUMPTION</span>',
-    MISSING:    '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-600">MISSING</span>',
-  }[status];
-  return `<div class="flex items-center gap-3 px-4 py-2.5">
-    <div class="flex-1 min-w-0"><span class="font-medium">${name}</span> <span class="text-neutral-400">· ${value}</span></div>
-    ${badge}<span class="hidden sm:inline text-xs text-neutral-400 w-24 text-right">${note}</span>
-  </div>`;
-}
-
-function editParams(btn) {
-  btn.closest('.flex-1').querySelectorAll('button').forEach(b => b.disabled = true);
-  assistantShell(`<p class="text-[15px] text-neutral-700 leading-relaxed">В боевой версии здесь открывается редактируемая таблица параметров — значение, источник и confidence по каждой строке. В прототипе просто нажмите «Собрать модель» в сообщении выше… хотя он уже заблокирован — напишите «собери модель» в чат 🙂</p>`);
-  flowStep = 2;
-}
-
-async function runGenericReply(text) {
-  const t = addTyping();
-  await sleep(1200);
-  if (/собер|модел|стро/i.test(text)) { replaceMsg(t, ''); document.getElementById(t).remove(); return buildModel(null); }
-  replaceMsg(t, `<p class="text-[15px] text-neutral-700 leading-relaxed">Зафиксировал уточнение: «${escapeHtml(text)}». Оно попадёт в Model Spec. Когда будете готовы — напишите «собери модель», и я сгенерирую Excel-файл.</p>`);
-}
-
-/* ---------- build model ---------- */
-async function buildModel(btn) {
-  if (btn) btn.closest('.flex-wrap').querySelectorAll('button').forEach(b => { b.disabled = true; b.classList.add('opacity-40'); });
-
-  const steps = [
-    'Выбираю revenue engine: Customers × ARPU + churn…',
-    'Строю листы: Assumptions, Revenue, OPEX, DCF…',
-    'Проставляю формулы и cross-sheet ссылки…',
-    'QA: пересчёт NPV/IRR вторым методом…',
-  ];
-
-  const id = assistantShell(`
-    <div class="rounded-2xl border border-neutral-200 p-4">
-      <div class="flex items-center gap-2 text-sm font-medium"><span class="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span><span id="buildStep">${steps[0]}</span></div>
-      <div class="mt-3 h-1.5 rounded-full bg-neutral-100 overflow-hidden"><div id="buildBar" class="progress-bar-fill h-full w-[5%] rounded-full bg-ink"></div></div>
-    </div>`);
-
-  for (let i = 0; i < steps.length; i++) {
-    await sleep(1100);
-    const s = document.getElementById('buildStep'); if (s) s.textContent = steps[i];
-    const b = document.getElementById('buildBar');  if (b) b.style.width = (8 + (i+1)/steps.length*88) + '%';
-  }
-  await sleep(600);
-
-  const { url, size } = generateXlsx();
-
-  replaceMsg(id, `
-    <p class="text-[15px] text-neutral-700 leading-relaxed mb-3">Готово. Собрал финансовую модель — 6 листов, формулы живые, допущения на отдельном листе Assumptions.</p>
-    <div class="rounded-2xl border border-neutral-200 bg-white p-4 flex items-center gap-3.5 shadow-sm hover:shadow transition max-w-md">
-      <div class="w-11 h-11 shrink-0 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/></svg>
-      </div>
-      <div class="min-w-0 flex-1">
-        <div class="text-sm font-semibold truncate">FinModel_SaaS_v1.xlsx</div>
-        <div class="text-xs text-neutral-400 mt-0.5">${fmtSize(size)} · Excel · создан только что</div>
-      </div>
-      <a href="${url}" download="FinModel_SaaS_v1.xlsx"
-         class="shrink-0 rounded-xl bg-ink text-white text-sm font-medium px-3.5 py-2 hover:bg-neutral-800 active:scale-95 transition flex items-center gap-1.5">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v10M7 11l5 5 5-5M5 21h14"/></svg>
-        Скачать
-      </a>
-    </div>
-    <div class="flex items-start gap-2 mt-3 text-[13px] text-neutral-500">
-      <svg class="shrink-0 mt-0.5" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
-      <span><b class="text-neutral-700">QA-отчёт:</b> 14 проверок пройдено · ошибок формул нет · NPV, пересчитанный независимо, совпал с моделью (расхождение &lt; 0,1%).</span>
-    </div>
-    <p class="text-[15px] text-neutral-700 leading-relaxed mt-3">Хотите сценарий «что если»? Например: «подними churn до 7%» — пересоберу модель за секунды.</p>
-  `);
-  flowStep = 3;
-}
-
-/* ---------- real xlsx generation (SheetJS) ---------- */
-function generateXlsx() {
-  const wb = XLSX.utils.book_new();
-
-  const assumptions = [
-    ['FinModel AI — Assumptions', '', ''],
-    [],
-    ['Параметр', 'Значение', 'Статус'],
-    ['Модель выручки', 'Клиенты × ARPU', 'SOURCE'],
-    ['ARPU, ₽/мес', 12000, 'SOURCE'],
-    ['Churn, %/мес', 0.04, 'SOURCE'],
-    ['Новые клиентов, мес 1', 25, 'ASSUMPTION'],
-    ['Рост новых клиентов, %/мес', 0.10, 'ASSUMPTION'],
-    ['Налог (УСН), % выручки', 0.06, 'ASSUMPTION'],
-    ['OPEX фикс., ₽/мес', 450000, 'ASSUMPTION'],
-    ['Ставка дисконтирования, % год.', 0.25, 'ASSUMPTION'],
-  ];
-  const ws1 = XLSX.utils.aoa_to_sheet(assumptions);
-  ws1['!cols'] = [{wch:32},{wch:18},{wch:12}];
-  XLSX.utils.book_append_sheet(wb, ws1, 'Assumptions');
-
-  // Revenue + P&L, 12 months, with live formulas
-  const rows = [['Месяц', 'Новые клиенты', 'Активные клиенты', 'Выручка, ₽', 'OPEX, ₽', 'Налог, ₽', 'FCF, ₽']];
-  for (let m = 1; m <= 12; m++) {
-    const r = m + 1;
-    rows.push([
-      m,
-      m === 1 ? 25 : { f: `ROUND(B${r-1}*(1+Assumptions!B8),0)` },
-      m === 1 ? { f: `B${r}` } : { f: `ROUND(C${r-1}*(1-Assumptions!B6)+B${r},0)` },
-      { f: `C${r}*Assumptions!B5` },
-      { f: `Assumptions!B10` },
-      { f: `D${r}*Assumptions!B9` },
-      { f: `D${r}-E${r}-F${r}` },
-    ]);
-  }
-  rows.push([]);
-  rows.push(['NPV (диск. мес.), ₽', { f: `NPV(Assumptions!B11/12,G2:G13)` }]);
-  const ws2 = XLSX.utils.aoa_to_sheet(rows);
-  ws2['!cols'] = [{wch:8},{wch:14},{wch:16},{wch:14},{wch:12},{wch:12},{wch:14}];
-  XLSX.utils.book_append_sheet(wb, ws2, 'Model');
-
-  const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-  const blob = new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-  return { url: URL.createObjectURL(blob), size: blob.size };
 }
 
 /* ================= misc ================= */

@@ -86,6 +86,14 @@ async def init_db() -> None:
     await _conn.commit()
 
 
+async def close_db() -> None:
+    """Закрывает соединение (иначе фоновый поток aiosqlite не даёт процессу завершиться)."""
+    global _conn
+    if _conn is not None:
+        await _conn.close()
+        _conn = None
+
+
 def _now() -> float:
     return time.time()
 

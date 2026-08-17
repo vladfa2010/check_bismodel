@@ -29,6 +29,11 @@ async def startup() -> None:
     asyncio.create_task(cleanup_loop())
 
 
+@app.on_event("shutdown")
+async def shutdown() -> None:
+    await db.close_db()
+
+
 @app.middleware("http")
 async def session_middleware(request: Request, call_next):
     """Читаем подписанную куку → request.state.user. Анонимов больше не создаём."""
