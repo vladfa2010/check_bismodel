@@ -92,8 +92,8 @@
 
 <div class="relative z-10 flex h-screen overflow-hidden">
 
-  <!-- ===== Sidebar ===== -->
-  <aside id="sidebar" class="hidden md:flex w-[268px] shrink-0 flex-col bg-surface border-r border-neutral-200/70">
+  <!-- ===== Sidebar: на мобиле — выезжающая шторка поверх, на десктопе — колонка ===== -->
+  <aside id="sidebar" class="fixed md:static inset-y-0 left-0 z-40 flex w-[280px] max-w-[85vw] shrink-0 flex-col bg-surface border-r border-neutral-200/70 shadow-2xl md:shadow-none -translate-x-full md:translate-x-0 transition-transform duration-200 ease-out">
     <div class="p-3">
       <button onclick="newChat()" class="w-full flex items-center gap-2.5 rounded-xl border border-neutral-200 bg-white px-3.5 py-2.5 text-sm font-medium hover:bg-neutral-50 transition shadow-sm">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
@@ -119,6 +119,9 @@
     </div>
   </aside>
 
+  <!-- затемнение под шторкой (только мобила) -->
+  <div id="sbBackdrop" class="fixed inset-0 z-30 bg-black/30 backdrop-blur-[1px] hidden md:hidden" onclick="closeSidebar()"></div>
+
   <!-- ===== Main ===== -->
   <main id="mainArea" class="flex-1 flex flex-col min-w-0 relative">
 
@@ -133,7 +136,7 @@
     <!-- header -->
     <header class="h-14 shrink-0 flex items-center justify-between px-4 md:px-6 border-b border-neutral-200/70 bg-white/80 backdrop-blur">
       <div class="flex items-center gap-3">
-        <button class="md:hidden p-2 -ml-2 rounded-lg hover:bg-neutral-100" onclick="alert('Сайдбар — в десктопной версии')">
+        <button class="md:hidden p-2 -ml-2 rounded-lg hover:bg-neutral-100" onclick="toggleSidebar()" aria-label="Меню">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
         </button>
         <div class="flex items-center gap-2">
@@ -146,7 +149,7 @@
       </div>
       <div class="flex items-center gap-2.5 text-xs">
         <select id="modelSelect" onchange="changeModel(this.value)"
-          class="rounded-lg border border-neutral-200 bg-white pl-2.5 pr-7 py-1.5 text-xs font-medium text-neutral-700 hover:border-neutral-300 transition cursor-pointer appearance-none bg-no-repeat"
+          class="max-w-[124px] sm:max-w-none truncate rounded-lg border border-neutral-200 bg-white pl-2.5 pr-7 py-1.5 text-xs font-medium text-neutral-700 hover:border-neutral-300 transition cursor-pointer appearance-none bg-no-repeat"
           style="background-image:url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23737373' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E&quot;); background-position:right 8px center;">
           <option>…</option>
         </select>
@@ -154,7 +157,7 @@
           <span id="apiPing" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-neutral-300 opacity-60"></span>
           <span id="apiDot" class="relative inline-flex rounded-full h-2 w-2 bg-neutral-300"></span>
         </span>
-        <span id="apiBadge" class="text-neutral-500">проверяю бэкенд…</span>
+        <span id="apiBadge" class="hidden sm:inline text-neutral-500">проверяю бэкенд…</span>
       </div>
     </header>
 
@@ -653,7 +656,7 @@ function renderHistory(chats) {
           Удалить
         </button>
       </div>`;
-    row.querySelector('.chat-open').onclick = () => { if (!active) openChat(c.id); };
+    row.querySelector('.chat-open').onclick = () => { if (!active) openChat(c.id); else closeSidebar(); };
     row.querySelector('.chat-open').title = c.title;
     const menu = row.querySelector('.chat-menu');
     row.querySelector('.chat-menubtn').onclick = (e) => {
@@ -693,7 +696,22 @@ async function chatAction(id, act) {
   }
 }
 
+/* ================= мобильная шторка сайдбара ================= */
+function openSidebar() {
+  document.getElementById('sidebar').classList.remove('-translate-x-full');
+  document.getElementById('sbBackdrop').classList.remove('hidden');
+}
+function closeSidebar() {
+  document.getElementById('sidebar').classList.add('-translate-x-full');
+  document.getElementById('sbBackdrop').classList.add('hidden');
+}
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.contains('-translate-x-full') ? openSidebar() : closeSidebar();
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSidebar(); });
+
 async function newChat() {
+  closeSidebar();
   if (streamAbort) { streamAbort.abort(); busy = false; }
   const r = await fetch('/api/chats', { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ model: document.getElementById('modelSelect').value || null }) });
@@ -707,6 +725,7 @@ async function newChat() {
 }
 
 async function openChat(id, knownChats) {
+  closeSidebar();
   if (streamAbort) { streamAbort.abort(); busy = false; }
   currentChatId = id;
   const r = await fetch(`/api/chats/${id}/messages`);

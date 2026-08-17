@@ -246,6 +246,29 @@ def main() -> int:
         val = page.eval_on_selector("#modelSelect", "el => el.value")
         check("модель диалога запомнилась после перезагрузки", "MiniMax" in val, val)
 
+        # ===== 10. Мобильная вёрстка: сайдбар-шторка =====
+        print("10) Мобильная вёрстка: сайдбар-шторка", flush=True)
+        mctx = browser.new_context(viewport={"width": 390, "height": 844}, has_touch=True)
+        mp = mctx.new_page()
+        mp.set_default_timeout(15000)
+        login(mp, "vlad", E2E_PASSWORD)
+        mp.wait_for_selector("#loginOverlay", state="hidden")
+        mp.wait_for_selector("#historyList .chat-open", timeout=8000)
+        hidden_cls = mp.eval_on_selector("#sidebar", "el => el.className")
+        check("на мобиле сайдбар скрыт за экраном", "-translate-x-full" in hidden_cls)
+
+        mp.click("button[aria-label='Меню']")
+        mp.wait_for_timeout(400)  # анимация выезда
+        shown = mp.eval_on_selector("#sidebar", "el => !el.classList.contains('-translate-x-full')")
+        backdrop = mp.eval_on_selector("#sbBackdrop", "el => !el.classList.contains('hidden')")
+        check("гамбургер выезжает шторку с подложкой", shown and backdrop)
+
+        mp.locator("#historyList .chat-open").nth(0).click()
+        mp.wait_for_timeout(600)
+        closed_cls = mp.eval_on_selector("#sidebar", "el => el.className")
+        check("выбор диалога закрывает шторку", "-translate-x-full" in closed_cls)
+        mctx.close()
+
         browser.close()
 
     os.unlink(doc.name)
