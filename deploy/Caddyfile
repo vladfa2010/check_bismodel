@@ -1,0 +1,23 @@
+{$DOMAIN} {
+	encode zstd gzip
+
+	# --- бэкенд (когда появится): ---
+	# handle /api/* {
+	# 	reverse_proxy app:8000
+	# }
+
+	# --- статика прототипа (сейчас): ---
+	root * /srv/site
+	file_server
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

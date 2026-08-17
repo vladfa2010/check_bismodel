@@ -1,0 +1,46 @@
+# FinModel AI — VDS (Beget) production compose
+# Сейчас: Caddy отдаёт статический прототип из корня репозитория.
+# Когда появится бэкенд — раскомментируйте app и блок reverse_proxy в Caddyfile.
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../:/srv/site:ro          # index.html и статика прототипа
+      - caddy_data:/data           # сертификаты Let's Encrypt
+      - caddy_config:/config
+    networks: [web]
+
+  # ===== бэкенд (срез 1+, см. docs/architecture-kimi-api.md) =====
+  # app:
+  #   build: ..
+  #   restart: unless-stopped
+  #   env_file: .env               # MOONSHOT_API_KEY, DATA_DIR=/var/data и т.д.
+  #   volumes:
+  #     - appdata:/var/data        # SQLite + файлы юзеров — персистентно
+  #   expose: ["8000"]
+  #   networks: [web]
+
+  # ===== бэкап SQLite (подключается вместе с app) =====
+  # litestream:
+  #   image: litestream/litestream:latest
+  #   restart: unless-stopped
+  #   volumes:
+  #     - appdata:/var/data
+  #     - ./litestream.yml:/etc/litestream.yml:ro
+  #   entrypoint: ["litestream", "replicate", "-config", "/etc/litestream.yml"]
+
+volumes:
+  caddy_data:
+  caddy_config:
+  # appdata:
+
+networks:
+  web:
