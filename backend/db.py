@@ -171,6 +171,51 @@ async def list_messages(chat_id: str, limit: int = 20) -> list[dict]:
     return list(reversed(rows))
 
 
+async def list_chats(uid: str) -> list[dict]:
+    """Диалоги юзера, свежие сверху; last_at — по последнему сообщению."""
+    return await _fetch(
+        """
+        SELECT c.id, c.title, c.created_at,
+               (SELECT MAX(m.created_at) FROM messages m WHERE m.chat_id = c.id) AS last_at
+        FROM chats c WHERE c.user_id = ?
+        ORDER BY COALESCE(last_at, c.created_at) DESC
+        """,
+        (uid,),
+    )
+
+
+async def create_chat(uid: str) -> dict:
+    cid = uuid.uuid4().hex
+    await _exec(
+        "INSERT INTO chats (id, user_id, title, created_at) VALUES (?, ?, 'Новый диалог', ?)",
+        (cid, uid, _now()),
+    )
+    return {"id": cid, "title": "Новый диалог", "created_at": _now()}
+
+
+async def get_chat(uid: str, chat_id: str) -> dict | None:
+    rows = await _fetch("SELECT * FROM chats WHERE id = ? AND user_id = ?", (chat_id, uid))
+    return rows[0] if rows else None
+
+
+async def set_chat_title_if_new(chat_id: str, content: str) -> None:
+    """Авто-название из первого сообщения — только если чат ещё «Новый диалог»."""
+    title = content.strip().replace("\n", " ")[:48]
+    if not title:
+        return
+    if len(content.strip()) > 48:
+        title += "…"
+    await _exec("UPDATE chats SET title = ? WHERE id = ? AND title = 'Новый диалог'", (title, chat_id))
+
+
+async def list_messages_full(chat_id: str, limit: int = 200) -> list[dict]:
+    """Полная история для отрисовки (старые сверху)."""
+    return await _fetch(
+        "SELECT role, content, created_at FROM messages WHERE chat_id = ? ORDER BY created_at ASC LIMIT ?",
+        (chat_id, limit),
+    )
+
+
 # ---------- files ----------
 async def add_file(fid: str, uid: str, name: str, mime: str, size: int, path: str) -> None:
     await _exec(

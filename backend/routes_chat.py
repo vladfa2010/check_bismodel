@@ -25,6 +25,31 @@ SYSTEM_PROMPT = (
 )
 
 
+@router.get("/chats")
+async def list_chats_ep(request: Request):
+    """Список диалогов юзера (свежие сверху)."""
+    uid = require_user(request)["id"]
+    return {"chats": await db.list_chats(uid)}
+
+
+@router.post("/chats")
+async def create_chat_ep(request: Request):
+    """Создать пустой диалог."""
+    uid = require_user(request)["id"]
+    return await db.create_chat(uid)
+
+
+@router.get("/chats/{chat_id}/messages")
+async def get_messages_ep(chat_id: str, request: Request):
+    """Полная история диалога (только своего)."""
+    uid = require_user(request)["id"]
+    chat = await db.get_chat(uid, chat_id)
+    if not chat:
+        raise HTTPException(404, "Диалог не найден")
+    return {"id": chat["id"], "title": chat["title"],
+            "messages": await db.list_messages_full(chat_id)}
+
+
 @router.post("/chats/{chat_id}/messages")
 async def send_message(chat_id: str, request: Request):
     body = await request.json()
@@ -34,8 +59,10 @@ async def send_message(chat_id: str, request: Request):
         raise HTTPException(400, "Пустое сообщение")
 
     uid = require_user(request)["id"]
-    await db.get_or_create_chat(uid, chat_id)
+    if not await db.get_chat(uid, chat_id):
+        raise HTTPException(404, "Диалог не найден")
     await db.add_message(chat_id, "user", content, file_ids)
+    await db.set_chat_title_if_new(chat_id, content)
 
     # документы — из кеша распарсенных текстов (не дёргаем Kimi повторно)
     doc_blocks = []

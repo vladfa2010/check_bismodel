@@ -150,6 +150,47 @@ def main() -> int:
         check("после 5 неверных паролей логин блокируется (429)", locked,
               f"статус на попытке {i + 1}: {r.status}")
 
+        # ===== 7. Множественные диалоги =====
+        # (victor уже залогинен после сценария 5)
+        print("7) Диалоги: создание, история, переключение", flush=True)
+        page.wait_for_selector("#historyList button", timeout=8000)
+        check("после входа диалог создан и виден в сайдбаре", True,
+              page.inner_text("#historyList"))
+
+        page.fill("#input", "Первый диалог: SaaS с подпиской")
+        page.press("#input", "Enter")
+        page.wait_for_selector(".streamText", timeout=90000)
+        page.wait_for_function("document.querySelectorAll('.streamText').length >= 1 && document.querySelector('.streamText').textContent.length > 20", timeout=90000)
+        page.wait_for_timeout(1500)  # тайтл обновится после ответа
+        page.reload(wait_until="networkidle")
+        page.wait_for_selector("#historyList button", timeout=8000)
+        title1 = page.inner_text("#historyList button >> nth=0")
+        check("тайтл первого диалога из первого сообщения", "SaaS" in title1, title1)
+
+        page.click("text=Новый чат")
+        page.wait_for_selector("#emptyState:not(.hidden)", timeout=5000)
+        check("новый чат: пустое состояние показано", True)
+
+        page.fill("#input", "Второй диалог: кофейня у метро")
+        page.press("#input", "Enter")
+        page.wait_for_selector(".streamText", timeout=90000)
+        page.wait_for_timeout(1500)
+        page.reload(wait_until="networkidle")
+        page.wait_for_selector("#historyList button", timeout=8000)
+        n = page.locator("#historyList button").count()
+        check("в сайдбаре два диалога", n == 2, f"buttons={n}")
+
+        page.locator("#historyList button").nth(1).click()  # первый (старый) диалог
+        page.wait_for_timeout(800)
+        body = page.inner_text("#chatContainer")
+        check("переключение: в старом диалоге его сообщения", "SaaS" in body and "кофейня" not in body,
+              body[:80].replace("\n", " "))
+        page.locator("#historyList button").nth(0).click()  # второй (свежий)
+        page.wait_for_timeout(800)
+        body = page.inner_text("#chatContainer")
+        check("переключение: в новом диалоге его сообщения", "кофейня" in body and "SaaS" not in body,
+              body[:80].replace("\n", " "))
+
         browser.close()
 
     os.unlink(doc.name)

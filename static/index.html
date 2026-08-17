@@ -95,7 +95,7 @@
   <!-- ===== Sidebar ===== -->
   <aside id="sidebar" class="hidden md:flex w-[268px] shrink-0 flex-col bg-surface border-r border-neutral-200/70">
     <div class="p-3">
-      <button onclick="resetChat()" class="w-full flex items-center gap-2.5 rounded-xl border border-neutral-200 bg-white px-3.5 py-2.5 text-sm font-medium hover:bg-neutral-50 transition shadow-sm">
+      <button onclick="newChat()" class="w-full flex items-center gap-2.5 rounded-xl border border-neutral-200 bg-white px-3.5 py-2.5 text-sm font-medium hover:bg-neutral-50 transition shadow-sm">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
         Новый чат
       </button>
@@ -371,7 +371,9 @@ mainArea.addEventListener('drop', e => {
 });
 
 /* ================= message renderers ================= */
-function hideEmpty() { const e = document.getElementById('emptyState'); if (e) e.remove(); }
+function hideEmpty() { const e = document.getElementById('emptyState'); if (e) e.classList.add('hidden'); }
+function showEmpty(show) { const e = document.getElementById('emptyState'); if (e) e.classList.toggle('hidden', !show); }
+function clearChat() { [...chatContainer.children].forEach(c => { if (c.id !== 'emptyState') c.remove(); }); }
 
 function addUserMessage(text, files) {
   hideEmpty();
@@ -439,12 +441,13 @@ function startStreamBubble(id) {
 }
 
 async function sendReal(text, files) {
+  if (!currentChatId) await loadChats();
   addUserMessage(text, files);
   busy = true;
   const id = addTyping();
   let bubble = null, acc = '';
   try {
-    const resp = await fetch('/api/chats/main/messages', {
+    const resp = await fetch(`/api/chats/${currentChatId}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -480,6 +483,7 @@ async function sendReal(text, files) {
       scrollBottom();
     }
     if (!bubble) startStreamBubble(id).textContent = '…';
+    loadChats(true);  // обновить заголовок диалога в сайдбаре
   } catch (e) {
     replaceMsg(id, `<p class="text-[15px] text-red-600 leading-relaxed">Бэкенд не ответил (${escapeHtml(String(e.message || e))}). Проверьте сервер — или перезагрузите страницу, чтобы вернуться в демо-режим.</p>`);
   }
@@ -488,6 +492,7 @@ async function sendReal(text, files) {
 
 /* ================= auth ================= */
 let currentUser = null;
+let currentChatId = null;   // активный диалог (id на сервере)
 
 function showLogin() {
   const o = document.getElementById('loginOverlay');
@@ -535,6 +540,7 @@ async function loadMe() {
   document.getElementById('sbUser').textContent = currentUser.username;
   document.getElementById('sbAvatar').textContent = currentUser.username.slice(0, 1).toUpperCase();
   loadUsage();
+  loadChats();
 }
 
 async function loadUsage() {
@@ -546,6 +552,70 @@ async function loadUsage() {
     document.getElementById('sbUsage').textContent =
       `токенов: ${(t.total || 0).toLocaleString('ru-RU')} · запросов: ${t.requests || 0}`;
   } catch { /* метрика не критична */ }
+}
+
+/* ================= диалоги: список, создание, переключение ================= */
+async function loadChats(keepCurrent) {
+  const r = await fetch('/api/chats');
+  if (!r.ok) return;
+  const chats = (await r.json()).chats;
+  if (!chats.length) {
+    const c = await (await fetch('/api/chats', { method: 'POST' })).json();
+    chats.push(c);
+  }
+  if (!keepCurrent || !chats.some(c => c.id === currentChatId)) {
+    await openChat(chats[0].id, chats);
+    return;
+  }
+  renderHistory(chats);
+}
+
+function renderHistory(chats) {
+  const nav = document.getElementById('historyList');
+  nav.innerHTML = '';
+  for (const c of chats) {
+    const b = document.createElement('button');
+    b.className = 'w-full text-left rounded-lg px-3 py-2 text-sm truncate transition ' +
+      (c.id === currentChatId ? 'bg-neutral-200/70 font-medium text-neutral-900' : 'text-neutral-600 hover:bg-neutral-100');
+    b.textContent = c.title;
+    b.title = c.title;
+    b.onclick = () => { if (!busy && c.id !== currentChatId) openChat(c.id); };
+    nav.appendChild(b);
+  }
+}
+
+async function newChat() {
+  if (busy) return;
+  const r = await fetch('/api/chats', { method: 'POST' });
+  if (!r.ok) return;
+  const c = await r.json();
+  currentChatId = c.id;
+  pendingFiles = []; renderChips();
+  clearChat(); showEmpty(true);
+  input.value = ''; autoResize(); input.focus();
+  loadChats(true);
+}
+
+async function openChat(id, knownChats) {
+  currentChatId = id;
+  const r = await fetch(`/api/chats/${id}/messages`);
+  if (!r.ok) return;
+  const data = await r.json();
+  pendingFiles = []; renderChips();
+  clearChat();
+  if (!data.messages.length) {
+    showEmpty(true);
+  } else {
+    showEmpty(false);
+    for (const m of data.messages) {
+      if (m.role === 'user') addUserMessage(m.content, []);
+      else if (m.role === 'assistant') {
+        assistantShell(`<p class="streamText text-[15px] leading-relaxed text-neutral-800 whitespace-pre-wrap">${escapeHtml(m.content)}</p>`);
+      }
+    }
+  }
+  scrollBottom();
+  if (knownChats) renderHistory(knownChats); else loadChats(true);
 }
 
 /* ================= определение режима: бэкенд или демо ================= */
@@ -584,7 +654,6 @@ function useSuggestion(btn) {
   input.value = btn.querySelector('.text-xs').textContent + '. Помоги собрать финмодель на 3 года.';
   autoResize(); input.focus();
 }
-function resetChat() { location.reload(); }
 detectBackend();
 autoResize();
 </script>
