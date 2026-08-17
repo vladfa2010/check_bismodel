@@ -120,6 +120,7 @@ async def send_message(chat_id: str, request: Request):
     doc_blocks = []
     for fid in file_ids:
         row = await db.get_file(fid, uid)
+        await db.attach_file_to_chat(fid, uid, chat_id)  # legacy-файлы без чата
         if not row:
             continue
         text = db.get_parsed_text(row)

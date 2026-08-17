@@ -244,21 +244,49 @@ async def set_chat_pinned(uid: str, chat_id: str, pinned: bool) -> bool:
 
 
 async def delete_chat(uid: str, chat_id: str) -> bool:
-    """Диалог + все его сообщения. Файлы юзера не трогаем — они общие."""
+    """Диалог + сообщения + его файлы (в корзину). Файлы без привязки не трогаем."""
     if not await get_chat(uid, chat_id):
         return False
     await _exec("DELETE FROM messages WHERE chat_id = ?", (chat_id,))
+    await soft_delete_chat_files(chat_id)
     await _exec("DELETE FROM chats WHERE id = ?", (chat_id,))
     return True
 
 
 # ---------- files ----------
-async def add_file(fid: str, uid: str, name: str, mime: str, size: int, path: str) -> None:
+async def add_file(fid: str, uid: str, name: str, mime: str, size: int, path: str,
+                   chat_id: str | None = None) -> None:
     await _exec(
-        "INSERT INTO files (id, user_id, orig_name, mime, size, path, created_at)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (fid, uid, name, mime or "application/octet-stream", size, path, _now()),
+        "INSERT INTO files (id, user_id, chat_id, orig_name, mime, size, path, created_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (fid, uid, chat_id, name, mime or "application/octet-stream", size, path, _now()),
     )
+
+
+async def attach_file_to_chat(fid: str, uid: str, chat_id: str) -> None:
+    """Привязать ранее загруженный без чата файл (legacy) — один раз, не перебивать."""
+    await _exec(
+        "UPDATE files SET chat_id = ? WHERE id = ? AND user_id = ? AND chat_id IS NULL",
+        (chat_id, fid, uid),
+    )
+
+
+async def list_chat_files(uid: str, chat_id: str) -> list[dict]:
+    """Файлы, прикреплённые к диалогу (живые, не в корзине)."""
+    return await _fetch(
+        "SELECT id, orig_name, size, parse_status, created_at FROM files"
+        " WHERE user_id = ? AND chat_id = ? AND deleted_at IS NULL ORDER BY created_at DESC",
+        (uid, chat_id),
+    )
+
+
+async def soft_delete_chat_files(chat_id: str) -> int:
+    """Каскад при удалении диалога: его файлы — в корзину (TTL чистит cleanup)."""
+    cur = await _exec(
+        "UPDATE files SET deleted_at = ? WHERE chat_id = ? AND deleted_at IS NULL",
+        (_now(), chat_id),
+    )
+    return cur.rowcount
 
 
 async def set_file_parsed(fid: str, kimi_file_id: str | None, parsed_path: str | None, status: str) -> None:

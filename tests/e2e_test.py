@@ -269,6 +269,52 @@ def main() -> int:
         check("выбор диалога закрывает шторку", "-translate-x-full" in closed_cls)
         mctx.close()
 
+        # ===== 11. Панель файлов диалога + каскад при удалении чата =====
+        # (dialog-обработчик из сценария 8 живой — confirm удаления примет он)
+        print("11) Файлы диалога: панель, удаление, каскад", flush=True)
+        page.click("button:has-text('Новый чат')")
+        page.wait_for_timeout(800)
+        mp2 = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False)
+        mp2.write("Ритейл: средний чек 2500 руб, 300 чеков/мес, маржа 35%.")
+        mp2.close()
+        page.set_input_files("#fileInput", mp2.name)
+        page.wait_for_selector(".fade-in", timeout=8000)
+        page.wait_for_function(
+            "() => document.querySelector('#filesList').innerText.trim().length > 0 && "
+            "!document.querySelector('#filesList').innerText.includes('появятся здесь')",
+            timeout=15000)
+        panel_txt = page.inner_text("#filesList")
+        check("файл появился в правой колонке", ".txt" in panel_txt, panel_txt[:60].replace("\n", " "))
+
+        page.hover("#filesList .group")
+        page.click("#filesList button[title='Удалить файл']")
+        page.wait_for_function(
+            "() => document.querySelector('#filesList').innerText.includes('появятся здесь')",
+            timeout=8000)
+        check("файл удалён из колонки (и в корзину на сервере)", True)
+
+        # каскад: API — чат с файлом, удаляем чат → файл в корзине (не виден)
+        r = page.request.post(f"{BASE}/api/chats", data="{}",
+                              headers={"Content-Type": "application/json"})
+        cid = (r.json())["id"]
+        with open(mp2.name, "rb") as fh:
+            payload = fh.read()
+        r = page.request.post(
+            f"{BASE}/api/files",
+            multipart={"file": {"name": "cascade.txt", "mimeType": "text/plain",
+                                "buffer": payload},
+                       "chat_id": cid})
+        check("файл загружен с привязкой к диалогу", r.ok, str(r.status))
+        r = page.request.get(f"{BASE}/api/chats/{cid}/files")
+        check("GET файлов диалога отдаёт 1 файл", len((r.json())["files"]) == 1)
+        r = page.request.delete(f"{BASE}/api/chats/{cid}")
+        check("диалог удалён", r.ok)
+        r = page.request.get(f"{BASE}/api/files")
+        names = [f["orig_name"] for f in (r.json())["files"]]
+        check("после удаления диалога его файл в корзине (не виден)", "cascade.txt" not in names,
+              str(names))
+        os.unlink(mp2.name)
+
         browser.close()
 
     os.unlink(doc.name)

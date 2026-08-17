@@ -220,6 +220,17 @@
       </div>
     </div>
   </main>
+
+  <!-- ===== Правая колонка: файлы диалога (десктоп) ===== -->
+  <aside id="filesPanel" class="hidden lg:flex w-[264px] shrink-0 flex-col bg-surface border-l border-neutral-200/70">
+    <div class="px-4 pt-4 pb-2 flex items-center justify-between">
+      <div class="text-[11px] font-semibold uppercase tracking-wider text-neutral-400">Файлы диалога</div>
+      <span id="filesCount" class="text-[11px] text-neutral-400"></span>
+    </div>
+    <div class="flex-1 overflow-y-auto px-2 pb-3 space-y-1" id="filesList">
+      <div class="px-3 py-2 text-xs text-neutral-400">Прикрепите файлы к сообщению — они появятся здесь</div>
+    </div>
+  </aside>
 </div>
 
 <!-- ===== Login overlay ===== -->
@@ -315,8 +326,10 @@ function removeFile(id) {
 /* --- загрузка файла на бэкенд и опрос статуса парсинга Kimi --- */
 async function uploadToServer(rec) {
   try {
+    if (!currentChatId) await loadChats();  // файл привязывается к диалогу
     const fd = new FormData();
     fd.append('file', rec.file, rec.name);
+    if (currentChatId) fd.append('chat_id', currentChatId);
     const r = await fetch('/api/files', { method: 'POST', body: fd });
     if (r.status === 401) { showLogin(); rec.status = 'error'; renderChips(); return; }
     if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -325,10 +338,47 @@ async function uploadToServer(rec) {
     rec.status = 'processing';
     renderChips();
     pollFileStatus(rec);
+    loadChatFiles();
   } catch (e) {
     rec.status = 'error';
     renderChips();
   }
+}
+
+/* ================= правая колонка: файлы диалога ================= */
+async function loadChatFiles() {
+  const list = document.getElementById('filesList');
+  if (!list || !currentChatId) return;
+  const r = await fetch(`/api/chats/${currentChatId}/files`);
+  if (!r.ok) return;
+  renderFilesPanel((await r.json()).files);
+}
+
+function renderFilesPanel(files) {
+  const list = document.getElementById('filesList');
+  document.getElementById('filesCount').textContent = files.length ? String(files.length) : '';
+  if (!files.length) {
+    list.innerHTML = '<div class="px-3 py-2 text-xs text-neutral-400">Прикрепите файлы к сообщению — они появятся здесь</div>';
+    return;
+  }
+  list.innerHTML = files.map(f => `
+    <div class="group flex items-center gap-2.5 rounded-lg px-2.5 py-2 hover:bg-neutral-100 transition">
+      <span class="w-8 h-8 shrink-0 rounded-lg ${fileIconColor(extOf(f.orig_name))} flex items-center justify-center text-[10px] font-bold uppercase">${escapeHtml(extOf(f.orig_name))}</span>
+      <span class="min-w-0 flex-1">
+        <span class="block text-[13px] font-medium truncate" title="${escapeHtml(f.orig_name)}">${escapeHtml(f.orig_name)}</span>
+        <span class="block text-[11px] ${f.parse_status === 'error' ? 'text-red-500' : 'text-neutral-400'}">${fmtSize(f.size)}${{ready:' · готово', processing:' · обработка…', uploaded:' · загрузка…', error:' · ошибка'}[f.parse_status] || ''}</span>
+      </span>
+      <button onclick="deleteChatFile('${f.id}')" title="Удалить файл"
+        class="shrink-0 p-1.5 rounded-md text-neutral-400 hover:text-red-600 hover:bg-red-50 transition opacity-0 group-hover:opacity-100">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg>
+      </button>
+    </div>`).join('');
+}
+
+async function deleteChatFile(fid) {
+  if (!confirm('Удалить файл? Он уйдёт в корзину на 7 дней.')) return;
+  const r = await fetch(`/api/files/${fid}`, { method: 'DELETE' });
+  if (r.ok) loadChatFiles();
 }
 async function pollFileStatus(rec) {
   for (let i = 0; i < 60; i++) {
@@ -340,6 +390,7 @@ async function pollFileStatus(rec) {
       if (j.status === 'ready' || j.status === 'error') {
         rec.status = j.status === 'ready' ? 'ready' : 'error';
         renderChips();
+        loadChatFiles();  // статус в правой колонке тоже обновляем
         return;
       }
     } catch { /* сеть мигнула — продолжаем опрос */ }
@@ -722,6 +773,7 @@ async function newChat() {
   clearChat(); showEmpty(true);
   input.value = ''; autoResize(); input.focus();
   loadChats(true);
+  loadChatFiles();
 }
 
 async function openChat(id, knownChats) {
@@ -746,6 +798,7 @@ async function openChat(id, knownChats) {
     }
   }
   scrollBottom();
+  loadChatFiles();
   if (knownChats) renderHistory(knownChats); else loadChats(true);
 }
 

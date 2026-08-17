@@ -32,6 +32,10 @@ async def parse_pipeline(fid: str, uid: str, path: str, filename: str) -> None:
 @router.post("/files")
 async def upload_file(request: Request, file: UploadFile = FileParam(...)):
     uid = require_user(request)["id"]
+    form = await request.form()
+    chat_id = form.get("chat_id") or None
+    if chat_id and not await db.get_chat(uid, str(chat_id)):
+        raise HTTPException(404, "Диалог не найден")
     data = await file.read()
     if not data:
         raise HTTPException(400, "Пустой файл")
@@ -42,10 +46,20 @@ async def upload_file(request: Request, file: UploadFile = FileParam(...)):
 
     fid = uuid.uuid4().hex[:12]
     path = storage.save_upload(uid, fid, file.filename or "file", data)
-    await db.add_file(fid, uid, file.filename or "file", file.content_type, len(data), path)
+    await db.add_file(fid, uid, file.filename or "file", file.content_type, len(data), path,
+                     chat_id=chat_id)
 
     asyncio.create_task(parse_pipeline(fid, uid, path, file.filename or "file"))
     return {"id": fid, "name": file.filename, "size": len(data), "status": "processing"}
+
+
+@router.get("/chats/{chat_id}/files")
+async def list_chat_files_ep(chat_id: str, request: Request):
+    """Файлы, прикреплённые к диалогу (правая колонка на десктопе)."""
+    uid = require_user(request)["id"]
+    if not await db.get_chat(uid, chat_id):
+        raise HTTPException(404, "Диалог не найден")
+    return {"files": await db.list_chat_files(uid, chat_id)}
 
 
 @router.get("/files")
