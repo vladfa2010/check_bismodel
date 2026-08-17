@@ -30,7 +30,7 @@ services:
       - "80:80"
       - "443:443"
     environment:
-      - DOMAIN=${DOMAIN:-localhost}
+      - DOMAIN=${DOMAIN:-:80}   # без домена — HTTP на :80; с доменом — авто-HTTPS
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data           # сертификаты Let's Encrypt

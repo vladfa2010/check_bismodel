@@ -1,4 +1,6 @@
-{$DOMAIN} {
+# Без домена: DOMAIN не задан → слушаем :80 по HTTP.
+# С доменом: DOMAIN=example.com в .env → Caddy сам выпустит Let's Encrypt (A-запись должна смотреть на сервер).
+{$DOMAIN::80} {
 	encode zstd gzip
 
 	# Всё проксируем в FastAPI: и статику, и /api (SSE-стриминг в том числе)
