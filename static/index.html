@@ -512,7 +512,10 @@ async function doLogin(e) {
       }),
     });
     if (r.ok) { location.reload(); return false; }
-    errEl.textContent = r.status === 401 ? 'Неверный логин или пароль' : 'Ошибка сервера, попробуйте ещё раз';
+    let msg = 'Ошибка сервера, попробуйте ещё раз';
+    if (r.status === 401) msg = 'Неверный логин или пароль';
+    else { const d = await r.json().catch(() => null); if (d && d.detail) msg = d.detail; }
+    errEl.textContent = msg;
   } catch {
     errEl.textContent = 'Сервер недоступен';
   }

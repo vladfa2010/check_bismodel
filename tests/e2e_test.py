@@ -138,6 +138,18 @@ def main() -> int:
         files = page.request.get(f"{BASE}/api/files").json()["files"]
         check("victor НЕ видит файлы vlad (изоляция)", len(files) == 0, f"files={len(files)}")
 
+        # ===== 6. Анти-брутфорс: 5 неудач → блок 429 =====
+        print("6) Анти-брутфорс", flush=True)
+        locked = False
+        for i in range(7):
+            r = page.request.post(f"{BASE}/api/auth/login",
+                                  data={"username": "brute_test", "password": f"wrong{i}"})
+            if r.status == 429:
+                locked = True
+                break
+        check("после 5 неверных паролей логин блокируется (429)", locked,
+              f"статус на попытке {i + 1}: {r.status}")
+
         browser.close()
 
     os.unlink(doc.name)
