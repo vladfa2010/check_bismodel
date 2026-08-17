@@ -22,6 +22,8 @@ from playwright.sync_api import sync_playwright
 
 BASE = os.getenv("BASE", "http://127.0.0.1:8123")
 CHROMIUM = os.getenv("CHROMIUM", "/usr/bin/chromium")
+# Пароль тестовых юзеров не храним в репо — передаётся через env при запуске.
+E2E_PASSWORD = os.environ["E2E_PASSWORD"]
 
 results = []
 
@@ -61,7 +63,7 @@ def main() -> int:
         err = page.inner_text("#loginError")
         check("неверный пароль → ошибка в форме", "Неверный логин" in err, err)
 
-        login(page, "vlad", "!1234567890")
+        login(page, "vlad", E2E_PASSWORD)
         page.wait_for_selector("#loginOverlay", state="hidden")
         page.wait_for_selector("#sbUser")
         who = page.inner_text("#sbUser")
@@ -138,7 +140,7 @@ def main() -> int:
         r = page.request.get(f"{BASE}/api/files")
         check("API без сессии → 401", r.status == 401, f"HTTP {r.status}")
 
-        login(page, "victor", "!1234567890")
+        login(page, "victor", E2E_PASSWORD)
         page.wait_for_selector("#loginOverlay", state="hidden")
         page.wait_for_selector("#sbUser")
         who = page.inner_text("#sbUser")

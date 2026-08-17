@@ -16,6 +16,10 @@ render.yaml           # статический фолбэк-деплой на Re
 docs/
   architecture-kimi-api.md   # архитектура v2 под Kimi API
   deploy-vds.md              # пошаговый деплой на VDS Beget
+  api.md                     # HTTP/SSE API, файлы, usage
+  deploy.md                  # паспорт прода и операции
+  tests.md                   # правила и реестр e2e-проверок
+  security.md                # политика безопасности
 ```
 
 ## Локальный запуск

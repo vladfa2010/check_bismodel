@@ -351,9 +351,9 @@ function chipStatus(f) {
 function renderChips() {
   attachChips.innerHTML = pendingFiles.map(f => `
     <div class="fade-in flex items-center gap-2 rounded-xl border border-neutral-200 bg-white pl-2.5 pr-1.5 py-1.5 shadow-sm">
-      <span class="w-7 h-7 rounded-lg ${fileIconColor(f.ext)} flex items-center justify-center text-[10px] font-bold uppercase">${f.ext}</span>
+      <span class="w-7 h-7 rounded-lg ${fileIconColor(f.ext)} flex items-center justify-center text-[10px] font-bold uppercase">${escapeHtml(f.ext)}</span>
       <span class="max-w-[180px]">
-        <span class="block text-[13px] font-medium truncate">${f.name}</span>
+        <span class="block text-[13px] font-medium truncate">${escapeHtml(f.name)}</span>
         <span class="block text-[11px] ${f.status === 'error' ? 'text-red-500' : 'text-neutral-400'}">${fmtSize(f.size)}${chipStatus(f)}</span>
       </span>
       <button onclick="removeFile(${f.id})" class="chip-remove ml-1 w-6 h-6 rounded-lg flex items-center justify-center text-neutral-400 transition">
@@ -386,8 +386,8 @@ function addUserMessage(text, files) {
     <div class="flex flex-wrap gap-1.5 mt-2 justify-end">
       ${files.map(f => `
         <span class="flex items-center gap-1.5 rounded-lg bg-white/15 px-2 py-1 text-xs">
-          <span class="font-bold uppercase text-[9px] opacity-80">${f.ext}</span>
-          <span class="max-w-[160px] truncate">${f.name}</span>
+          <span class="font-bold uppercase text-[9px] opacity-80">${escapeHtml(f.ext)}</span>
+          <span class="max-w-[160px] truncate">${escapeHtml(f.name)}</span>
         </span>`).join('')}
     </div>` : '';
   chatContainer.insertAdjacentHTML('beforeend', `

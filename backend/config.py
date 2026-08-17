@@ -64,9 +64,11 @@ COOKIE_MAX_AGE = 60 * 60 * 24 * 365   # год
 
 # --- предустановленные пользователи (регистрация закрыта) ---
 # Формат env: SEED_USERS='{"vlad": "pass1", "victor": "pass2"}'
+# ВАЖНО: дефолт ниже — только для локальной разработки, пароль заведомо слабый.
+# На проде SEED_USERS задаётся обязательно (deploy/.env).
 SEED_USERS = json.loads(os.getenv("SEED_USERS", "")) if os.getenv("SEED_USERS") else {
-    "vlad": "!1234567890",
-    "victor": "!1234567890",
+    "vlad": "dev-only-change-me",
+    "victor": "dev-only-change-me",
 }
 
 # --- retention ---
