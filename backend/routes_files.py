@@ -1,11 +1,11 @@
-"""Файлы: приём, отправка в Kimi Files API, кеш распарсенного текста, удаление."""
+"""Файлы: приём, локальный парсинг текста, кеш, удаление."""
 import asyncio
 import uuid
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile
 from fastapi import File as FileParam
 
-from . import config, db, storage
+from . import config, db, docparse, storage
 from .kimi import kimi
 from .routes_auth import require_user
 
@@ -13,10 +13,16 @@ router = APIRouter()
 
 
 async def parse_pipeline(fid: str, uid: str, path: str, filename: str) -> None:
-    """Фон: Kimi upload → получение распарсенного текста → кеш на диск."""
+    """Фон: локальный парсинг → кеш на диск. Kimi Files API — запасной путь для PDF-сканов."""
     try:
-        kimi_id = await kimi.upload_file(path, filename)
-        text = await kimi.file_content(kimi_id)
+        try:
+            text = docparse.extract_text(path, filename)
+            kimi_id = None
+        except Exception:
+            if config.MOCK_KIMI:
+                raise  # ни локально, ни через Kimi — честная ошибка
+            kimi_id = await kimi.upload_file(path, filename)
+            text = await kimi.file_content(kimi_id)
         parsed_path = storage.save_parsed(uid, fid, text)
         await db.set_file_parsed(fid, kimi_id, parsed_path, "ready")
     except Exception:

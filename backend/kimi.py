@@ -19,8 +19,8 @@ def _mock_reply(user_text: str, docs: list[str]) -> str:
     if docs:
         files_line = f"\n\nЯ получил и разобрал {len(docs)} документ(а) — в боевом режиме извлеку из них параметры модели."
     return (
-        "Принял! Это ответ бэкенда в mock-режиме (MOONSHOT_API_KEY не задан, "
-        "запрос к Kimi не уходил)."
+        "Принял! Это ответ бэкенда в mock-режиме (у выбранной модели нет API-ключа, "
+        "запрос к LLM не уходил)."
         f"{files_line}\n\n"
         "В боевом режиме на этом месте Kimi обсудит с вами бизнес-модель, "
         "задаст вопросы о недостающих параметрах (цена, клиенты, churn, налоги) "
@@ -69,13 +69,21 @@ class KimiGateway:
                 return resp.text
 
     # ---------- чат ----------
-    async def chat_stream(self, messages: list[dict], json_mode: bool = False):
+    async def chat_stream(self, messages: list[dict], json_mode: bool = False,
+                          model: str | None = None):
         """Асинхронный генератор событий: ("delta", текст) и в конце ("usage", dict).
 
-        Usage просим через stream_options.include_usage — это сырьё для
-        таблицы usage_events (учёт расхода токенов по юзерам).
+        Мультипровайдерно: model выбирает запись из config.available_models()
+        (moonshot / minimax — оба OpenAI-совместимых). Модель без ключа
+        (или MOCK_KIMI=1) отвечает заглушкой. Usage просим через
+        stream_options.include_usage; если провайдер его не прислал —
+        считаем грубую оценку, чтобы учёт токенов не проваливался.
         """
-        if self.mock:
+        spec = config.model_spec(model) or {
+            "id": model or "unknown", "title": model, "provider": "mock",
+            "base_url": "", "key": "", "mock": True,
+        }
+        if spec["mock"]:
             user_text = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
             docs = [m for m in messages if "Документ «" in m.get("content", "")]
             text = _mock_reply(user_text, docs)
@@ -93,23 +101,27 @@ class KimiGateway:
             return
 
         payload = {
-            "model": config.KIMI_MODEL,
+            "model": spec["id"],
             "messages": messages,
             "stream": True,
             "stream_options": {"include_usage": True},
-            # kimi-k3 принимает только temperature=1 — поле не передаём вовсе
+            # temperature не передаём: kimi-k3 принимает только 1, у MiniMax дефолт адекватный
             "max_completion_tokens": 4096,
         }
+        if spec["provider"] == "minimax":
+            # мысли M3 прилетают отдельным полем reasoning_details — контент остаётся чистым
+            payload["reasoning_split"] = True
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
 
+        headers = {"Authorization": f"Bearer {spec['key']}"}
         last_error: Exception | None = None
         for attempt in range(MAX_RETRIES):
             try:
                 async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=30)) as client:
                     async with client.stream(
-                        "POST", f"{self.base}/chat/completions",
-                        headers=self._headers(), json=payload,
+                        "POST", f"{spec['base_url']}/chat/completions",
+                        headers=headers, json=payload,
                     ) as resp:
                         if resp.status_code == 429 and attempt < MAX_RETRIES - 1:
                             retry_after = float(resp.headers.get("Retry-After", 2 ** attempt))
@@ -117,8 +129,9 @@ class KimiGateway:
                             continue
                         if resp.status_code != 200:
                             body = (await resp.aread()).decode(errors="replace")[:400]
-                            raise RuntimeError(f"Kimi API {resp.status_code}: {body}")
+                            raise RuntimeError(f"{spec['provider']} API {resp.status_code}: {body}")
                         usage = None
+                        acc_len = 0
                         async for line in resp.aiter_lines():
                             if not line.startswith("data:"):
                                 continue
@@ -136,8 +149,15 @@ class KimiGateway:
                                 continue
                             delta = choices[0].get("delta") or {}
                             if delta.get("content"):
+                                acc_len += len(delta["content"])
                                 yield ("delta", delta["content"])
-                        yield ("usage", usage or {})
+                        if not usage:
+                            # провайдер не вернул usage — грубая оценка, помечаем estimated
+                            in_est = sum(len(m.get("content", "")) for m in messages) // 4
+                            out_est = acc_len // 4
+                            usage = {"prompt_tokens": in_est, "completion_tokens": out_est,
+                                     "total_tokens": in_est + out_est, "estimated": True}
+                        yield ("usage", usage)
                         return
             except (httpx.TransportError, httpx.TimeoutException) as e:
                 last_error = e

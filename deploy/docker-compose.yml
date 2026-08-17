@@ -11,6 +11,9 @@ services:
       - MOONSHOT_API_KEY=${MOONSHOT_API_KEY:-}
       - MOONSHOT_BASE_URL=${MOONSHOT_BASE_URL:-https://api.moonshot.ai/v1}
       - KIMI_MODEL=${KIMI_MODEL:-kimi-k3}
+      - MINIMAX_API_KEY=${MINIMAX_API_KEY:-}
+      - MINIMAX_BASE_URL=${MINIMAX_BASE_URL:-https://api.minimax.io/v1}
+      - MINIMAX_MODEL=${MINIMAX_MODEL:-MiniMax-M3}
       - SESSION_SECRET=${SESSION_SECRET:-dev-secret-change-me}
       - DATA_DIR=/var/data
     volumes:

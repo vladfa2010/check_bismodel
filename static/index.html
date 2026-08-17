@@ -144,7 +144,12 @@
           <span class="hidden sm:inline text-xs text-neutral-400 border border-neutral-200 rounded-full px-2 py-0.5">прототип</span>
         </div>
       </div>
-      <div class="flex items-center gap-2 text-xs">
+      <div class="flex items-center gap-2.5 text-xs">
+        <select id="modelSelect" onchange="changeModel(this.value)"
+          class="rounded-lg border border-neutral-200 bg-white pl-2.5 pr-7 py-1.5 text-xs font-medium text-neutral-700 hover:border-neutral-300 transition cursor-pointer appearance-none bg-no-repeat"
+          style="background-image:url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23737373' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E&quot;); background-position:right 8px center;">
+          <option>…</option>
+        </select>
         <span class="relative flex h-2 w-2">
           <span id="apiPing" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-neutral-300 opacity-60"></span>
           <span id="apiDot" class="relative inline-flex rounded-full h-2 w-2 bg-neutral-300"></span>
@@ -499,6 +504,7 @@ async function sendReal(text, files) {
 let currentUser = null;
 let currentChatId = null;   // активный диалог (id на сервере)
 let streamAbort = null;     // AbortController активного стрима
+let modelsList = [];        // доступные модели с бэкенда
 
 function showLogin() {
   const o = document.getElementById('loginOverlay');
@@ -546,6 +552,7 @@ async function loadMe() {
   document.getElementById('sbUser').textContent = currentUser.username;
   document.getElementById('sbAvatar').textContent = currentUser.username.slice(0, 1).toUpperCase();
   loadUsage();
+  await loadModels();
   loadChats();
 }
 
@@ -560,13 +567,41 @@ async function loadUsage() {
   } catch { /* метрика не критична */ }
 }
 
+/* ================= модели ================= */
+async function loadModels() {
+  try {
+    const r = await fetch('/api/models');
+    if (!r.ok) return;
+    const j = await r.json();
+    modelsList = j.models || [];
+    const sel = document.getElementById('modelSelect');
+    sel.innerHTML = '';
+    for (const m of modelsList) {
+      const o = document.createElement('option');
+      o.value = m.id;
+      o.textContent = m.title + (m.mock ? ' · mock' : '');
+      sel.appendChild(o);
+    }
+    if (j.default) sel.value = j.default;
+  } catch { /* селектор останется пустым */ }
+}
+
+async function changeModel(modelId) {
+  if (!currentChatId) return;  // выбор применится к следующему диалогу
+  await fetch(`/api/chats/${currentChatId}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: modelId }),
+  });
+}
+
 /* ================= диалоги: список, создание, переключение ================= */
 async function loadChats(keepCurrent) {
   const r = await fetch('/api/chats');
   if (!r.ok) return;
   const chats = (await r.json()).chats;
   if (!chats.length) {
-    const c = await (await fetch('/api/chats', { method: 'POST' })).json();
+    const c = await (await fetch('/api/chats', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: document.getElementById('modelSelect').value || null }) })).json();
     chats.push(c);
   }
   if (!keepCurrent || !chats.some(c => c.id === currentChatId)) {
@@ -651,7 +686,8 @@ async function chatAction(id, act) {
 
 async function newChat() {
   if (streamAbort) { streamAbort.abort(); busy = false; }
-  const r = await fetch('/api/chats', { method: 'POST' });
+  const r = await fetch('/api/chats', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: document.getElementById('modelSelect').value || null }) });
   if (!r.ok) return;
   const c = await r.json();
   currentChatId = c.id;
@@ -667,6 +703,7 @@ async function openChat(id, knownChats) {
   const r = await fetch(`/api/chats/${id}/messages`);
   if (!r.ok) return;
   const data = await r.json();
+  if (data.model) document.getElementById('modelSelect').value = data.model;
   pendingFiles = []; renderChips();
   clearChat();
   if (!data.messages.length) {
@@ -695,17 +732,18 @@ async function detectBackend() {
     if (!r.ok) throw 0;
     const h = await r.json();
     realMode = true;
-    kimiLive = h.kimi === 'live';
+    const liveModels = (h.models || []).filter(m => !m.mock);
+    kimiLive = liveModels.length > 0;
     if (kimiLive) {
-      badge.textContent = 'Kimi API · ' + h.model;
+      badge.textContent = 'LLM на связи: ' + liveModels.map(m => m.title).join(' + ');
       dot.className = dot.className.replace('bg-neutral-300', 'bg-emerald-500');
       ping.className = ping.className.replace('bg-neutral-300', 'bg-emerald-400');
-      if (hint) hint.textContent = 'Бэкенд подключён · ответы стримятся из Kimi API';
+      if (hint) hint.textContent = 'Бэкенд подключён · ответы стримятся из выбранной модели';
     } else {
-      badge.textContent = 'бэкенд ок · Kimi mock (нет ключа)';
+      badge.textContent = 'бэкенд ок · LLM mock (нет ключей)';
       dot.className = dot.className.replace('bg-neutral-300', 'bg-amber-400');
       ping.className = ping.className.replace('bg-neutral-300', 'bg-amber-300');
-      if (hint) hint.textContent = 'Бэкенд подключён, но ключа Kimi нет — ответы заглушка';
+      if (hint) hint.textContent = 'Бэкенд подключён, но ключей LLM нет — ответы заглушка';
     }
     await loadMe();
   } catch {

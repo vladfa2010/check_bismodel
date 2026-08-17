@@ -67,6 +67,7 @@ MIGRATIONS = [
     ("users", "password_hash", "password_hash TEXT"),
     ("files", "deleted_at", "deleted_at REAL"),
     ("chats", "pinned", "pinned INTEGER NOT NULL DEFAULT 0"),
+    ("chats", "model", "model TEXT"),
 ]
 
 _conn: aiosqlite.Connection | None = None
@@ -177,7 +178,7 @@ async def list_chats(uid: str) -> list[dict]:
     """Диалоги юзера, свежие сверху; last_at — по последнему сообщению."""
     return await _fetch(
         """
-        SELECT c.id, c.title, c.pinned, c.created_at,
+        SELECT c.id, c.title, c.pinned, c.model, c.created_at,
                (SELECT MAX(m.created_at) FROM messages m WHERE m.chat_id = c.id) AS last_at
         FROM chats c WHERE c.user_id = ?
         ORDER BY c.pinned DESC, COALESCE(last_at, c.created_at) DESC
@@ -186,13 +187,20 @@ async def list_chats(uid: str) -> list[dict]:
     )
 
 
-async def create_chat(uid: str) -> dict:
+async def create_chat(uid: str, model: str | None = None) -> dict:
     cid = uuid.uuid4().hex
+    model = model or config.default_model()
     await _exec(
-        "INSERT INTO chats (id, user_id, title, created_at) VALUES (?, ?, 'Новый диалог', ?)",
-        (cid, uid, _now()),
+        "INSERT INTO chats (id, user_id, title, model, created_at) VALUES (?, ?, 'Новый диалог', ?, ?)",
+        (cid, uid, model, _now()),
     )
-    return {"id": cid, "title": "Новый диалог", "created_at": _now()}
+    return {"id": cid, "title": "Новый диалог", "model": model, "created_at": _now()}
+
+
+async def set_chat_model(uid: str, chat_id: str, model: str) -> bool:
+    cur = await _exec(
+        "UPDATE chats SET model = ? WHERE id = ? AND user_id = ?", (model, chat_id, uid))
+    return cur.rowcount > 0
 
 
 async def get_chat(uid: str, chat_id: str) -> dict | None:

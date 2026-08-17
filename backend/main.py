@@ -51,8 +51,12 @@ async def session_middleware(request: Request, call_next):
 @app.get("/healthz")
 async def healthz():
     from . import config
+    models = config.available_models()
     return {
         "ok": True,
+        "models": [{"id": m["id"], "title": m["title"], "mock": m["mock"]} for m in models],
+        "default_model": config.default_model(),
+        # совместимость со старым фронтом
         "kimi": "mock" if config.MOCK_KIMI else "live",
         "model": config.KIMI_MODEL,
     }

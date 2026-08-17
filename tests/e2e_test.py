@@ -219,6 +219,23 @@ def main() -> int:
         t = page.inner_text("#historyList")
         check("диалог удалён", "Тестовый диалог" not in t, t[:60].replace("\n", " "))
 
+        # ===== 9. Выбор модели =====
+        print("9) Выбор модели (Kimi K3 / MiniMax M3)", flush=True)
+        opts = page.locator("#modelSelect option").all_inner_texts()
+        check("в селекторе две модели", len(opts) == 2, str(opts))
+        mm = [o for o in opts if "MiniMax" in o][0]
+        page.select_option("#modelSelect", label=mm)
+        page.wait_for_timeout(500)
+        page.fill("#input", "Проверка переключения на MiniMax")
+        page.press("#input", "Enter")
+        page.wait_for_selector(".streamText", timeout=90000)
+        page.wait_for_timeout(800)
+        page.reload(wait_until="networkidle")
+        page.wait_for_selector("#historyList .chat-open", timeout=8000)
+        page.wait_for_timeout(1200)
+        val = page.eval_on_selector("#modelSelect", "el => el.value")
+        check("модель диалога запомнилась после перезагрузки", "MiniMax" in val, val)
+
         browser.close()
 
     os.unlink(doc.name)

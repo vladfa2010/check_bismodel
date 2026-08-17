@@ -25,18 +25,35 @@ SYSTEM_PROMPT = (
 )
 
 
+@router.get("/models")
+async def list_models_ep(request: Request):
+    """Модели, доступные юзеру (только те, у которых есть ключ; в mock — все)."""
+    require_user(request)
+    return {"models": [{"id": m["id"], "title": m["title"], "mock": m["mock"]}
+                       for m in config.available_models()],
+            "default": config.default_model()}
+
+
 @router.get("/chats")
 async def list_chats_ep(request: Request):
-    """Список диалогов юзера (свежие сверху)."""
+    """Список диалогов юзера (закреплённые сверху, дальше по свежести)."""
     uid = require_user(request)["id"]
     return {"chats": await db.list_chats(uid)}
 
 
 @router.post("/chats")
 async def create_chat_ep(request: Request):
-    """Создать пустой диалог."""
+    """Создать пустой диалог; можно сразу задать модель."""
     uid = require_user(request)["id"]
-    return await db.create_chat(uid)
+    model = None
+    try:
+        body = await request.json()
+        model = body.get("model")
+    except Exception:
+        pass
+    if model and not config.model_spec(model):
+        raise HTTPException(400, "Неизвестная модель")
+    return await db.create_chat(uid, model)
 
 
 @router.patch("/chats/{chat_id}")
@@ -49,6 +66,10 @@ async def update_chat_ep(chat_id: str, request: Request):
         ok = await db.rename_chat(uid, chat_id, str(body["title"]))
     if "pinned" in body:
         ok = await db.set_chat_pinned(uid, chat_id, bool(body["pinned"])) and ok
+    if "model" in body:
+        if not config.model_spec(str(body["model"])):
+            raise HTTPException(400, "Неизвестная модель")
+        ok = await db.set_chat_model(uid, chat_id, str(body["model"])) and ok
     if not ok:
         raise HTTPException(404, "Диалог не найден")
     return {"ok": True}
@@ -71,6 +92,7 @@ async def get_messages_ep(chat_id: str, request: Request):
     if not chat:
         raise HTTPException(404, "Диалог не найден")
     return {"id": chat["id"], "title": chat["title"],
+            "model": chat["model"] or config.default_model(),
             "messages": await db.list_messages_full(chat_id)}
 
 
@@ -83,8 +105,10 @@ async def send_message(chat_id: str, request: Request):
         raise HTTPException(400, "Пустое сообщение")
 
     uid = require_user(request)["id"]
-    if not await db.get_chat(uid, chat_id):
+    chat = await db.get_chat(uid, chat_id)
+    if not chat:
         raise HTTPException(404, "Диалог не найден")
+    model = chat["model"] or config.default_model()
     await db.add_message(chat_id, "user", content, file_ids)
     await db.set_chat_title_if_new(chat_id, content)
 
@@ -112,7 +136,7 @@ async def send_message(chat_id: str, request: Request):
         full: list[str] = []
         usage: dict = {}
         try:
-            async for kind, payload in kimi.chat_stream(messages):
+            async for kind, payload in kimi.chat_stream(messages, model=model):
                 if kind == "delta":
                     full.append(payload)
                     yield "data: " + json.dumps(
@@ -121,7 +145,7 @@ async def send_message(chat_id: str, request: Request):
                 elif kind == "usage":
                     usage = payload or {}
             await db.add_message(chat_id, "assistant", "".join(full), [])
-            await db.add_usage(uid, chat_id, "chat", config.KIMI_MODEL, usage)
+            await db.add_usage(uid, chat_id, "chat", model, usage)
             yield "data: " + json.dumps({"type": "done", "usage": usage}) + "\n\n"
         except Exception as e:  # noqa: BLE001 — ошибку честно показываем в чате
             yield "data: " + json.dumps(
