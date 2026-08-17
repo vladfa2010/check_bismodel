@@ -1,14 +1,29 @@
-# FinModel AI — прототип
+# FinModel AI
 
-Кликабельный прототип чата для генерации финансовых моделей: загрузка файлов, Data Extraction Report, сборка и скачивание настоящего `.xlsx` (генерируется в браузере). Ответы ИИ сымитированы — контур Kimi API подключается в бэкенде (см. `docs/architecture-kimi-api.md`).
+Чат для генерации финансовых моделей: загрузка файлов, обсуждение бизнес-модели с ИИ, на выходе — Excel-модель. Бэкенд: FastAPI + SQLite + Kimi API (SSE-стриминг). Без ключа Kimi работает в mock-режиме, без бэкенда фронт сам переходит в демо-режим.
 
 ## Структура
 
 ```
-index.html            # весь прототип (чат, вложения, эмбиент-фон, генерация xlsx)
-render.yaml           # blueprint для деплоя на Render (Static Site)
+static/index.html     # фронт: чат, вложения, эмбиент-фон, генерация xlsx
+backend/              # FastAPI: main, config, db (SQLite+WAL), storage, kimi (KimiGateway),
+                      #         routes_files (upload→Kimi→кеш парсинга), routes_chat (SSE)
+Dockerfile            # all-in-one образ (python 3.12 + LibreOffice для QA-движка)
+requirements.txt
+.env.example          # MOONSHOT_API_KEY, SESSION_SECRET, DOMAIN…
+deploy/               # VDS (Beget): docker-compose, Caddyfile, bootstrap скрипт
+render.yaml           # статический фолбэк-деплой на Render (только фронт)
 docs/
   architecture-kimi-api.md   # архитектура v2 под Kimi API
+  deploy-vds.md              # пошаговый деплой на VDS Beget
+```
+
+## Локальный запуск
+
+```bash
+pip install -r requirements.txt
+MOONSHOT_API_KEY=sk-... python -m uvicorn backend.main:app --port 8000
+# без ключа — mock-режим:  python -m uvicorn backend.main:app --port 8000
 ```
 
 ## Деплой на Render (5 минут)

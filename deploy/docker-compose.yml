@@ -1,8 +1,28 @@
 # FinModel AI — VDS (Beget) production compose
-# Сейчас: Caddy отдаёт статический прототип из корня репозитория.
-# Когда появится бэкенд — раскомментируйте app и блок reverse_proxy в Caddyfile.
+# Caddy (TLS) → app (FastAPI: статика + /api) → данные в named volume appdata
+#
+# Перед первым запуском: cp ../.env.example .env и заполнить значения.
 
 services:
+  app:
+    build: ..
+    restart: unless-stopped
+    environment:
+      - MOONSHOT_API_KEY=${MOONSHOT_API_KEY:-}
+      - MOONSHOT_BASE_URL=${MOONSHOT_BASE_URL:-https://api.moonshot.ai/v1}
+      - KIMI_MODEL=${KIMI_MODEL:-kimi-k3}
+      - SESSION_SECRET=${SESSION_SECRET:-dev-secret-change-me}
+      - DATA_DIR=/var/data
+    volumes:
+      - appdata:/var/data          # SQLite + файлы юзеров — персистентно
+    expose: ["8000"]
+    networks: [web]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
@@ -13,22 +33,14 @@ services:
       - DOMAIN=${DOMAIN:-localhost}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ../:/srv/site:ro          # index.html и статика прототипа
       - caddy_data:/data           # сертификаты Let's Encrypt
       - caddy_config:/config
     networks: [web]
+    depends_on:
+      app:
+        condition: service_started
 
-  # ===== бэкенд (срез 1+, см. docs/architecture-kimi-api.md) =====
-  # app:
-  #   build: ..
-  #   restart: unless-stopped
-  #   env_file: .env               # MOONSHOT_API_KEY, DATA_DIR=/var/data и т.д.
-  #   volumes:
-  #     - appdata:/var/data        # SQLite + файлы юзеров — персистентно
-  #   expose: ["8000"]
-  #   networks: [web]
-
-  # ===== бэкап SQLite (подключается вместе с app) =====
+  # ===== бэкап SQLite (срез «полировка») =====
   # litestream:
   #   image: litestream/litestream:latest
   #   restart: unless-stopped
@@ -38,9 +50,9 @@ services:
   #   entrypoint: ["litestream", "replicate", "-config", "/etc/litestream.yml"]
 
 volumes:
+  appdata:
   caddy_data:
   caddy_config:
-  # appdata:
 
 networks:
   web:

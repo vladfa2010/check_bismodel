@@ -4,7 +4,7 @@ services:
   - type: web
     name: finmodel-prototype
     env: static
-    staticPublishPath: .     # index.html лежит в корне репозитория
+    staticPublishPath: static   # index.html теперь в static/ (боевой вариант — Docker на VDS)
     pullRequestPreviewsEnabled: true
     headers:
       - path: /*

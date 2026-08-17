@@ -1,14 +1,10 @@
 {$DOMAIN} {
 	encode zstd gzip
 
-	# --- бэкенд (когда появится): ---
-	# handle /api/* {
-	# 	reverse_proxy app:8000
-	# }
-
-	# --- статика прототипа (сейчас): ---
-	root * /srv/site
-	file_server
+	# Всё проксируем в FastAPI: и статику, и /api (SSE-стриминг в том числе)
+	reverse_proxy app:8000 {
+		flush_interval -1   # мгновенная отдача SSE-чанков, без буферизации
+	}
 
 	header {
 		X-Content-Type-Options nosniff

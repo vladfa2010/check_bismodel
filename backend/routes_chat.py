@@ -1,0 +1,76 @@
+"""Чат: SSE-стрим ответов Kimi, история в SQLite, документы из кеша."""
+import json
+from datetime import date
+
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
+
+from . import config, db
+from .kimi import kimi
+
+router = APIRouter()
+
+# Стабильный префикс системного промпта — НЕ менять без необходимости:
+# байт-в-байт одинаковое начало messages попадает в Context Caching Kimi.
+SYSTEM_PROMPT = (
+    "Ты — FinModel AI, ассистент для построения финансовых моделей бизнеса. "
+    "Твоя задача — обсудить с пользователем его бизнес-модель: выручку, цены, "
+    "клиентов, затраты, налоги, горизонт планирования. Задавай уточняющие вопросы "
+    "по одному-два за раз, коротко и по делу. Отвечай по-русски. "
+    "Никогда не выдумывай данные: если параметр неизвестен — спроси или явно пометь "
+    "его как допущение. Если пользователь прислал документы — опирайся на них и "
+    "указывай, из какого документа взята цифра. Финансовые расчёты не выполняй "
+    "в уме: модель строит отдельный детерминированный движок."
+)
+
+
+@router.post("/chats/{chat_id}/messages")
+async def send_message(chat_id: str, request: Request):
+    body = await request.json()
+    content = (body.get("content") or "").strip()
+    file_ids = body.get("file_ids") or []
+    if not content and not file_ids:
+        raise HTTPException(400, "Пустое сообщение")
+
+    uid = request.state.user_id
+    await db.get_or_create_chat(uid, chat_id)
+    await db.add_message(chat_id, "user", content, file_ids)
+
+    # документы — из кеша распарсенных текстов (не дёргаем Kimi повторно)
+    doc_blocks = []
+    for fid in file_ids:
+        row = await db.get_file(fid, uid)
+        if not row:
+            continue
+        text = db.get_parsed_text(row)
+        if text:
+            doc_blocks.append(f"Документ «{row['orig_name']}»:\n{text[:config.DOC_TEXT_LIMIT]}")
+        else:
+            doc_blocks.append(f"Документ «{row['orig_name']}» загружен, текст ещё обрабатывается.")
+
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages.append({"role": "system", "content": f"Текущая дата: {date.today().isoformat()}"})
+    for block in doc_blocks:
+        messages.append({"role": "system", "content": block})
+    for m in await db.list_messages(chat_id, config.HISTORY_LIMIT):
+        if m["role"] in ("user", "assistant"):
+            messages.append({"role": m["role"], "content": m["content"]})
+
+    async def event_stream():
+        full: list[str] = []
+        try:
+            async for delta in kimi.chat_stream(messages):
+                full.append(delta)
+                yield "data: " + json.dumps({"type": "delta", "text": delta}, ensure_ascii=False) + "\n\n"
+            await db.add_message(chat_id, "assistant", "".join(full), [])
+            yield 'data: {"type":"done"}\n\n'
+        except Exception as e:  # noqa: BLE001 — ошибку честно показываем в чате
+            yield "data: " + json.dumps(
+                {"type": "error", "message": f"Ошибка генерации: {e}"}, ensure_ascii=False
+            ) + "\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

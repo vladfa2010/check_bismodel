@@ -1,0 +1,10 @@
+.git
+.github
+docs
+deploy
+data
+*.md
+!requirements.txt
+__pycache__
+*.pyc
+.env

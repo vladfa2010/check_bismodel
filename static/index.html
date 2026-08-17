@@ -217,10 +217,12 @@
 
 <script>
 /* ================= state ================= */
-let pendingFiles = [];      // {id, name, size, ext}
+let pendingFiles = [];      // {id, name, size, ext, file, status, serverId}
 let fileSeq = 0;
 let busy = false;
 let flowStep = 0;           // scripted demo flow stage
+let realMode = false;       // true, если бэкенд отвечает на /healthz
+let kimiLive = false;       // true, если у бэкенда есть ключ Kimi
 
 const chatContainer = document.getElementById('chatContainer');
 const chatScroll    = document.getElementById('chatScroll');
@@ -274,7 +276,7 @@ function renderChips() {
       <span class="w-7 h-7 rounded-lg ${fileIconColor(f.ext)} flex items-center justify-center text-[10px] font-bold uppercase">${f.ext}</span>
       <span class="max-w-[180px]">
         <span class="block text-[13px] font-medium truncate">${f.name}</span>
-        <span class="block text-[11px] text-neutral-400">${fmtSize(f.size)}</span>
+        <span class="block text-[11px] ${f.status === 'error' ? 'text-red-500' : 'text-neutral-400'}">${fmtSize(f.size)}${chipStatus(f)}</span>
       </span>
       <button onclick="removeFile(${f.id})" class="chip-remove ml-1 w-6 h-6 rounded-lg flex items-center justify-center text-neutral-400 transition">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
@@ -349,6 +351,8 @@ async function sendMessage() {
   pendingFiles = []; renderChips();
   input.value = ''; autoResize();
 
+  if (realMode) { await sendReal(text, files); return; }
+
   addUserMessage(text, files);
   busy = true;
 
@@ -356,6 +360,90 @@ async function sendMessage() {
   else await runGenericReply(text);
 
   busy = false;
+}
+
+/* ================= реальный бэкенд: SSE-стрим ответа ================= */
+function startStreamBubble(id) {
+  const el = document.getElementById(id).querySelector('.flex-1');
+  el.innerHTML = '<p class="streamText text-[15px] leading-relaxed text-neutral-800 whitespace-pre-wrap"></p>';
+  return el.querySelector('.streamText');
+}
+
+async function sendReal(text, files) {
+  addUserMessage(text, files);
+  busy = true;
+  const id = addTyping();
+  let bubble = null, acc = '';
+  try {
+    const resp = await fetch('/api/chats/main/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content: text,
+        file_ids: files.filter(f => f.serverId).map(f => f.serverId),
+      }),
+    });
+    if (!resp.ok || !resp.body) throw new Error('HTTP ' + resp.status);
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const events = buf.split('\n\n');
+      buf = events.pop();
+      for (const ev of events) {
+        const line = ev.trim();
+        if (!line.startsWith('data:')) continue;
+        let j; try { j = JSON.parse(line.slice(5)); } catch { continue; }
+        if (j.type === 'delta') {
+          if (!bubble) bubble = startStreamBubble(id);
+          acc += j.text;
+          bubble.textContent = acc;
+        } else if (j.type === 'error') {
+          if (!bubble) bubble = startStreamBubble(id);
+          bubble.innerHTML = `<span class="text-red-600">${escapeHtml(j.message)}</span>`;
+        }
+      }
+      scrollBottom();
+    }
+    if (!bubble) startStreamBubble(id).textContent = '…';
+  } catch (e) {
+    replaceMsg(id, `<p class="text-[15px] text-red-600 leading-relaxed">Бэкенд не ответил (${escapeHtml(String(e.message || e))}). Проверьте сервер — или перезагрузите страницу, чтобы вернуться в демо-режим.</p>`);
+  }
+  busy = false;
+}
+
+/* ================= определение режима: бэкенд или демо ================= */
+async function detectBackend() {
+  const badge = document.getElementById('apiBadge');
+  const dot = document.getElementById('apiDot');
+  const ping = document.getElementById('apiPing');
+  const hint = document.getElementById('modeHint');
+  try {
+    const r = await fetch('/healthz', { cache: 'no-store' });
+    if (!r.ok) throw 0;
+    const h = await r.json();
+    realMode = true;
+    kimiLive = h.kimi === 'live';
+    if (kimiLive) {
+      badge.textContent = 'Kimi API · ' + h.model;
+      dot.className = dot.className.replace('bg-neutral-300', 'bg-emerald-500');
+      ping.className = ping.className.replace('bg-neutral-300', 'bg-emerald-400');
+      if (hint) hint.textContent = 'Бэкенд подключён · ответы стримятся из Kimi API';
+    } else {
+      badge.textContent = 'бэкенд ок · Kimi mock (нет ключа)';
+      dot.className = dot.className.replace('bg-neutral-300', 'bg-amber-400');
+      ping.className = ping.className.replace('bg-neutral-300', 'bg-amber-300');
+      if (hint) hint.textContent = 'Бэкенд подключён, но ключа Kimi нет — ответы заглушка';
+    }
+  } catch {
+    realMode = false;
+    badge.textContent = 'демо-режим · без бэкенда';
+    if (hint) hint.textContent = 'Прототип без бэкенда · ответы ИИ сымитированы · файл модели генерируется настоящий';
+  }
 }
 
 async function runExtractionFlow(text, files) {
