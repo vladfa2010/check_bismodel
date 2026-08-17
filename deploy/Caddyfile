@@ -3,6 +3,10 @@
 (common) {
 	encode zstd gzip
 
+	# HTML не кешировать в браузере — иначе после деплоя юзеры сидят на старом JS
+	@html path / /index.html /static/index.html
+	header @html Cache-Control "no-cache"
+
 	# Всё проксируем в FastAPI: и статику, и /api (SSE-стриминг в том числе)
 	reverse_proxy app:8000 {
 		flush_interval -1   # мгновенная отдача SSE-чанков, без буферизации

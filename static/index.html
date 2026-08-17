@@ -446,9 +446,11 @@ async function sendReal(text, files) {
   busy = true;
   const id = addTyping();
   let bubble = null, acc = '';
+  streamAbort = new AbortController();
   try {
     const resp = await fetch(`/api/chats/${currentChatId}/messages`, {
       method: 'POST',
+      signal: streamAbort.signal,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         content: text,
@@ -485,14 +487,18 @@ async function sendReal(text, files) {
     if (!bubble) startStreamBubble(id).textContent = '…';
     loadChats(true);  // обновить заголовок диалога в сайдбаре
   } catch (e) {
-    replaceMsg(id, `<p class="text-[15px] text-red-600 leading-relaxed">Бэкенд не ответил (${escapeHtml(String(e.message || e))}). Проверьте сервер — или перезагрузите страницу, чтобы вернуться в демо-режим.</p>`);
+    if (e.name !== 'AbortError') {
+      replaceMsg(id, `<p class="text-[15px] text-red-600 leading-relaxed">Бэкенд не ответил (${escapeHtml(String(e.message || e))}). Проверьте сервер — или перезагрузите страницу.</p>`);
+    }
   }
   busy = false;
+  streamAbort = null;
 }
 
 /* ================= auth ================= */
 let currentUser = null;
 let currentChatId = null;   // активный диалог (id на сервере)
+let streamAbort = null;     // AbortController активного стрима
 
 function showLogin() {
   const o = document.getElementById('loginOverlay');
@@ -579,13 +585,13 @@ function renderHistory(chats) {
       (c.id === currentChatId ? 'bg-neutral-200/70 font-medium text-neutral-900' : 'text-neutral-600 hover:bg-neutral-100');
     b.textContent = c.title;
     b.title = c.title;
-    b.onclick = () => { if (!busy && c.id !== currentChatId) openChat(c.id); };
+    b.onclick = () => { if (c.id !== currentChatId) openChat(c.id); };
     nav.appendChild(b);
   }
 }
 
 async function newChat() {
-  if (busy) return;
+  if (streamAbort) { streamAbort.abort(); busy = false; }
   const r = await fetch('/api/chats', { method: 'POST' });
   if (!r.ok) return;
   const c = await r.json();
@@ -597,6 +603,7 @@ async function newChat() {
 }
 
 async function openChat(id, knownChats) {
+  if (streamAbort) { streamAbort.abort(); busy = false; }
   currentChatId = id;
   const r = await fetch(`/api/chats/${id}/messages`);
   if (!r.ok) return;
