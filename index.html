@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FinModel AI — прототип</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+        colors: {
+          ink: '#0f1115',
+          accent: '#4f46e5',
+          surface: '#fafafa',
+        }
+      }
+    }
+  }
+</script>
+<style>
+  html, body { height: 100%; }
+  body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: #d4d4d8; border-radius: 8px; }
+  ::-webkit-scrollbar-thumb:hover { background: #a1a1aa; }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  .msg-enter { animation: msgIn .35s cubic-bezier(.21,.86,.36,1) both; }
+  @keyframes msgIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+  .typing-dot { width: 7px; height: 7px; border-radius: 9999px; background: #a1a1aa; animation: blink 1.2s infinite; }
+  .typing-dot:nth-child(2) { animation-delay: .15s; }
+  .typing-dot:nth-child(3) { animation-delay: .3s; }
+  @keyframes blink { 0%, 80%, 100% { opacity: .25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }
+
+  .progress-bar-fill { transition: width .5s ease; }
+
+  textarea { resize: none; }
+  textarea:focus { outline: none; }
+
+  .fade-in { animation: fadeIn .3s ease both; }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+  .chip-remove:hover { background: #e4e4e7; }
+
+  /* ===== ambient background ===== */
+  #ambient { position: fixed; inset: 0; z-index: 0; overflow: hidden; background: #f5f6f8; }
+  .blob { position: absolute; border-radius: 9999px; filter: blur(90px); will-change: transform; pointer-events: none; }
+  .blob-1 { width: 48vw; height: 48vw; min-width: 420px; min-height: 420px;
+            background: radial-gradient(circle at 30% 30%, #c7d2fe, #818cf8);
+            top: -14%; left: -10%; opacity: .55; animation: drift1 26s ease-in-out infinite alternate; }
+  .blob-2 { width: 42vw; height: 42vw; min-width: 380px; min-height: 380px;
+            background: radial-gradient(circle at 60% 40%, #ddd6fe, #a78bfa);
+            bottom: -16%; right: -8%; opacity: .5; animation: drift2 32s ease-in-out infinite alternate; }
+  .blob-3 { width: 30vw; height: 30vw; min-width: 300px; min-height: 300px;
+            background: radial-gradient(circle at 50% 50%, #a7f3d0, #34d399);
+            top: 28%; right: 14%; opacity: .32; animation: drift3 23s ease-in-out infinite alternate; }
+  .blob-4 { width: 26vw; height: 26vw; min-width: 260px; min-height: 260px;
+            background: radial-gradient(circle at 50% 50%, #fde68a, #fbbf24);
+            bottom: 6%; left: 18%; opacity: .28; animation: drift4 29s ease-in-out infinite alternate; }
+  @keyframes drift1 { to { transform: translate(11vw, 9vh) scale(1.18) rotate(8deg); } }
+  @keyframes drift2 { to { transform: translate(-9vw, -11vh) scale(1.12) rotate(-10deg); } }
+  @keyframes drift3 { to { transform: translate(-12vw, 10vh) scale(1.25); } }
+  @keyframes drift4 { to { transform: translate(10vw, -9vh) scale(1.2) rotate(12deg); } }
+  @media (prefers-reduced-motion: reduce) { .blob { animation: none; } }
+
+  /* chat column stays on clean white, ambient visible at the edges */
+  .chat-veil {
+    background: linear-gradient(to right,
+      rgba(255,255,255,0) 0%,
+      rgba(255,255,255,.94) 11%,
+      rgba(255,255,255,.94) 89%,
+      rgba(255,255,255,0) 100%);
+  }
+  @media (max-width: 1023px) { .chat-veil { background: rgba(255,255,255,.94); } }
+</style>
+</head>
+<body class="bg-white text-ink">
+
+<!-- ambient animated background -->
+<div id="ambient" aria-hidden="true">
+  <div class="blob blob-1"></div>
+  <div class="blob blob-2"></div>
+  <div class="blob blob-3"></div>
+  <div class="blob blob-4"></div>
+</div>
+
+<div class="relative z-10 flex h-screen overflow-hidden">
+
+  <!-- ===== Sidebar ===== -->
+  <aside id="sidebar" class="hidden md:flex w-[268px] shrink-0 flex-col bg-surface border-r border-neutral-200/70">
+    <div class="p-3">
+      <button onclick="resetChat()" class="w-full flex items-center gap-2.5 rounded-xl border border-neutral-200 bg-white px-3.5 py-2.5 text-sm font-medium hover:bg-neutral-50 transition shadow-sm">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+        Новый чат
+      </button>
+    </div>
+    <div class="px-4 pt-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-neutral-400">История</div>
+    <nav class="flex-1 overflow-y-auto px-2 space-y-0.5" id="historyList">
+      <a class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-neutral-600 hover:bg-neutral-200/50 cursor-pointer truncate">SaaS-модель, подписка B2B</a>
+      <a class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-neutral-600 hover:bg-neutral-200/50 cursor-pointer truncate">Кофейня: unit-экономика</a>
+      <a class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-neutral-600 hover:bg-neutral-200/50 cursor-pointer truncate">Маркетплейс, take rate 12%</a>
+    </nav>
+    <div class="p-3 border-t border-neutral-200/70">
+      <div class="flex items-center gap-2.5 rounded-xl px-2 py-2">
+        <div class="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-violet-500 text-white flex items-center justify-center text-xs font-semibold">АК</div>
+        <div class="min-w-0">
+          <div class="text-sm font-medium truncate">Алексей К.</div>
+          <div class="text-xs text-neutral-400 truncate">Тариф: Founder</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ===== Main ===== -->
+  <main id="mainArea" class="flex-1 flex flex-col min-w-0 relative">
+
+    <!-- drag & drop overlay -->
+    <div id="dropOverlay" class="pointer-events-none absolute inset-0 z-30 hidden items-center justify-center bg-indigo-50/80 backdrop-blur-sm">
+      <div class="rounded-2xl border-2 border-dashed border-indigo-400 bg-white px-10 py-8 text-center shadow-lg">
+        <div class="text-base font-semibold">Отпустите файлы, чтобы прикрепить</div>
+        <div class="text-sm text-neutral-500 mt-1">PDF, XLSX, DOCX, PPTX, TXT</div>
+      </div>
+    </div>
+
+    <!-- header -->
+    <header class="h-14 shrink-0 flex items-center justify-between px-4 md:px-6 border-b border-neutral-200/70 bg-white/80 backdrop-blur">
+      <div class="flex items-center gap-3">
+        <button class="md:hidden p-2 -ml-2 rounded-lg hover:bg-neutral-100" onclick="alert('Сайдбар — в десктопной версии')">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+        </button>
+        <div class="flex items-center gap-2">
+          <div class="w-7 h-7 rounded-lg bg-ink text-white flex items-center justify-center">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8z"/></svg>
+          </div>
+          <span class="font-semibold text-[15px]">FinModel AI</span>
+          <span class="hidden sm:inline text-xs text-neutral-400 border border-neutral-200 rounded-full px-2 py-0.5">прототип</span>
+        </div>
+      </div>
+      <div class="flex items-center gap-2 text-xs">
+        <span class="relative flex h-2 w-2">
+          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60"></span>
+          <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+        </span>
+        <span class="text-neutral-500">Kimi API · демо-режим</span>
+      </div>
+    </header>
+
+    <!-- chat scroll area -->
+    <div id="chatScroll" class="flex-1 overflow-y-auto">
+      <div class="max-w-3xl mx-auto px-4 md:px-6 py-6" id="chatContainer">
+
+        <!-- empty state -->
+        <div id="emptyState" class="min-h-[70vh] flex flex-col items-center justify-center text-center">
+          <div class="w-12 h-12 rounded-2xl bg-ink text-white flex items-center justify-center mb-5 shadow-md">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8z"/></svg>
+          </div>
+          <h1 class="text-2xl md:text-[28px] font-semibold tracking-tight">Опишите вашу бизнес-модель</h1>
+          <p class="text-neutral-500 mt-2 max-w-md text-[15px] leading-relaxed">Расскажите текстом и прикрепите файлы — питч-дек, финмодель, заметки. Я извлеку параметры и соберу финансовую модель в Excel.</p>
+          <div class="grid sm:grid-cols-3 gap-2.5 mt-8 w-full max-w-2xl">
+            <button onclick="useSuggestion(this)" class="text-left rounded-2xl border border-neutral-200 bg-white p-3.5 hover:border-neutral-300 hover:shadow-sm transition">
+              <div class="text-sm font-medium">SaaS, подписка</div>
+              <div class="text-xs text-neutral-400 mt-1">B2B SaaS, 3 тарифа, churn 4%/мес, ARPU 12 000 ₽</div>
+            </button>
+            <button onclick="useSuggestion(this)" class="text-left rounded-2xl border border-neutral-200 bg-white p-3.5 hover:border-neutral-300 hover:shadow-sm transition">
+              <div class="text-sm font-medium">Розница / кофейня</div>
+              <div class="text-xs text-neutral-400 mt-1">Трафик × средний чек, посадка 32 места, аренда</div>
+            </button>
+            <button onclick="useSuggestion(this)" class="text-left rounded-2xl border border-neutral-200 bg-white p-3.5 hover:border-neutral-300 hover:shadow-sm transition">
+              <div class="text-sm font-medium">Маркетплейс</div>
+              <div class="text-xs text-neutral-400 mt-1">GMV × take rate 12%, CAC обеих сторон</div>
+            </button>
+          </div>
+        </div>
+
+        <!-- messages injected here -->
+      </div>
+    </div>
+
+    <!-- composer -->
+    <div class="shrink-0 bg-gradient-to-t from-white via-white/80 to-transparent">
+      <div class="max-w-3xl mx-auto px-4 md:px-6 pb-4 md:pb-6 pt-2">
+
+        <!-- attached files chips -->
+        <div id="attachChips" class="flex flex-wrap gap-2 mb-2 empty:mb-0"></div>
+
+        <div class="rounded-2xl border border-neutral-300 bg-white shadow-sm focus-within:border-neutral-400 focus-within:shadow transition">
+          <textarea id="input" rows="1" placeholder="Опишите бизнес-модель или задайте вопрос…"
+            class="w-full bg-transparent px-4 pt-3.5 pb-1 text-[15px] placeholder:text-neutral-400 max-h-48"></textarea>
+          <div class="flex items-center justify-between px-2.5 pb-2.5 pt-1">
+            <div class="flex items-center gap-1">
+              <button onclick="document.getElementById('fileInput').click()" title="Прикрепить файл"
+                class="p-2 rounded-xl text-neutral-500 hover:bg-neutral-100 hover:text-neutral-700 transition">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l8.57-8.57A4 4 0 1118 8.84l-8.59 8.57a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
+              </button>
+              <span class="hidden sm:inline text-xs text-neutral-400">PDF · XLSX · DOCX · ссылки — просто перетащите</span>
+            </div>
+            <button id="sendBtn" onclick="sendMessage()" title="Отправить"
+              class="w-9 h-9 rounded-xl bg-ink text-white flex items-center justify-center hover:bg-neutral-800 active:scale-95 transition disabled:opacity-30 disabled:pointer-events-none">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+            </button>
+          </div>
+        </div>
+        <p class="text-center text-[11px] text-neutral-400 mt-2.5">Прототип интерфейса · ответы ИИ сымитированы · файл модели генерируется настоящий</p>
+      </div>
+    </div>
+  </main>
+</div>
+
+<input type="file" id="fileInput" class="hidden" multiple accept=".pdf,.xlsx,.xls,.docx,.pptx,.txt,.csv,.md">
+
+<script>
+/* ================= state ================= */
+let pendingFiles = [];      // {id, name, size, ext}
+let fileSeq = 0;
+let busy = false;
+let flowStep = 0;           // scripted demo flow stage
+
+const chatContainer = document.getElementById('chatContainer');
+const chatScroll    = document.getElementById('chatScroll');
+const input         = document.getElementById('input');
+const attachChips   = document.getElementById('attachChips');
+const sendBtn       = document.getElementById('sendBtn');
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+/* ================= helpers ================= */
+function fmtSize(b) {
+  if (b < 1024) return b + ' Б';
+  if (b < 1024*1024) return (b/1024).toFixed(1).replace('.', ',') + ' КБ';
+  return (b/1024/1024).toFixed(1).replace('.', ',') + ' МБ';
+}
+function extOf(name) { const p = name.split('.'); return p.length > 1 ? p.pop().toLowerCase() : 'file'; }
+
+function fileIconColor(ext) {
+  return { pdf:'bg-red-100 text-red-600', xlsx:'bg-emerald-100 text-emerald-700', xls:'bg-emerald-100 text-emerald-700',
+           csv:'bg-emerald-100 text-emerald-700', docx:'bg-blue-100 text-blue-600', pptx:'bg-orange-100 text-orange-600',
+           txt:'bg-neutral-200 text-neutral-600', md:'bg-neutral-200 text-neutral-600' }[ext] || 'bg-neutral-200 text-neutral-600';
+}
+
+function scrollBottom() { requestAnimationFrame(() => { chatScroll.scrollTop = chatScroll.scrollHeight; }); }
+
+function autoResize() {
+  input.style.height = 'auto';
+  input.style.height = Math.min(input.scrollHeight, 192) + 'px';
+  sendBtn.disabled = !input.value.trim() && pendingFiles.length === 0;
+}
+input.addEventListener('input', autoResize);
+input.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+
+/* ================= attach ================= */
+document.getElementById('fileInput').addEventListener('change', e => {
+  addFiles([...e.target.files]); e.target.value = '';
+});
+function addFiles(files) {
+  files.forEach(f => pendingFiles.push({ id: ++fileSeq, name: f.name, size: f.size, ext: extOf(f.name) }));
+  renderChips(); autoResize();
+}
+function removeFile(id) {
+  pendingFiles = pendingFiles.filter(f => f.id !== id);
+  renderChips(); autoResize();
+}
+function renderChips() {
+  attachChips.innerHTML = pendingFiles.map(f => `
+    <div class="fade-in flex items-center gap-2 rounded-xl border border-neutral-200 bg-white pl-2.5 pr-1.5 py-1.5 shadow-sm">
+      <span class="w-7 h-7 rounded-lg ${fileIconColor(f.ext)} flex items-center justify-center text-[10px] font-bold uppercase">${f.ext}</span>
+      <span class="max-w-[180px]">
+        <span class="block text-[13px] font-medium truncate">${f.name}</span>
+        <span class="block text-[11px] text-neutral-400">${fmtSize(f.size)}</span>
+      </span>
+      <button onclick="removeFile(${f.id})" class="chip-remove ml-1 w-6 h-6 rounded-lg flex items-center justify-center text-neutral-400 transition">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>`).join('');
+}
+
+/* drag & drop */
+const mainArea = document.getElementById('mainArea');
+const dropOverlay = document.getElementById('dropOverlay');
+let dragDepth = 0;
+mainArea.addEventListener('dragenter', e => { e.preventDefault(); dragDepth++; dropOverlay.classList.remove('hidden'); dropOverlay.classList.add('flex'); });
+mainArea.addEventListener('dragleave', e => { e.preventDefault(); if (--dragDepth <= 0) { dragDepth = 0; dropOverlay.classList.add('hidden'); dropOverlay.classList.remove('flex'); } });
+mainArea.addEventListener('dragover', e => e.preventDefault());
+mainArea.addEventListener('drop', e => {
+  e.preventDefault(); dragDepth = 0;
+  dropOverlay.classList.add('hidden'); dropOverlay.classList.remove('flex');
+  if (e.dataTransfer.files.length) addFiles([...e.dataTransfer.files]);
+});
+
+/* ================= message renderers ================= */
+function hideEmpty() { const e = document.getElementById('emptyState'); if (e) e.remove(); }
+
+function addUserMessage(text, files) {
+  hideEmpty();
+  const filesHtml = files.length ? `
+    <div class="flex flex-wrap gap-1.5 mt-2 justify-end">
+      ${files.map(f => `
+        <span class="flex items-center gap-1.5 rounded-lg bg-white/15 px-2 py-1 text-xs">
+          <span class="font-bold uppercase text-[9px] opacity-80">${f.ext}</span>
+          <span class="max-w-[160px] truncate">${f.name}</span>
+        </span>`).join('')}
+    </div>` : '';
+  chatContainer.insertAdjacentHTML('beforeend', `
+    <div class="msg-enter flex justify-end mb-6">
+      <div class="max-w-[85%] md:max-w-[75%]">
+        <div class="rounded-2xl rounded-br-md bg-ink text-white px-4 py-3 text-[15px] leading-relaxed whitespace-pre-wrap">${escapeHtml(text)}${filesHtml}</div>
+      </div>
+    </div>`);
+  scrollBottom();
+}
+
+function assistantShell(inner) {
+  const id = 'msg-' + Math.random().toString(36).slice(2, 8);
+  chatContainer.insertAdjacentHTML('beforeend', `
+    <div class="msg-enter flex gap-3 mb-6" id="${id}">
+      <div class="w-7 h-7 shrink-0 rounded-lg bg-ink text-white flex items-center justify-center mt-0.5">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8z"/></svg>
+      </div>
+      <div class="min-w-0 flex-1 pt-0.5">${inner}</div>
+    </div>`);
+  scrollBottom();
+  return id;
+}
+
+function addTyping() {
+  return assistantShell(`<div class="flex items-center gap-1.5 h-7"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></div>`);
+}
+function replaceMsg(id, inner) {
+  const el = document.getElementById(id);
+  if (el) el.querySelector('.flex-1').innerHTML = inner;
+  scrollBottom();
+}
+function escapeHtml(s) { return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+/* ================= scripted AI flow ================= */
+async function sendMessage() {
+  const text = input.value.trim();
+  if ((!text && pendingFiles.length === 0) || busy) return;
+
+  const files = [...pendingFiles];
+  pendingFiles = []; renderChips();
+  input.value = ''; autoResize();
+
+  addUserMessage(text, files);
+  busy = true;
+
+  if (flowStep === 0) await runExtractionFlow(text, files);
+  else await runGenericReply(text);
+
+  busy = false;
+}
+
+async function runExtractionFlow(text, files) {
+  // 1) thinking
+  const t = addTyping();
+  await sleep(1600);
+
+  // 2) extraction report message
+  const fileLine = files.length
+    ? `<p class="text-[15px] leading-relaxed text-neutral-700">Изучил ${files.length === 1 ? 'файл' : 'файла'} <b>${files.map(f=>f.name).join('</b>, <b>')}</b> и ваше описание. Вот что удалось извлечь:</p>`
+    : `<p class="text-[15px] leading-relaxed text-neutral-700">Принял описание. Вот параметры, которые я зафиксировал:</p>`;
+
+  replaceMsg(t, `
+    ${fileLine}
+    <div class="mt-3 rounded-2xl border border-neutral-200 overflow-hidden">
+      <div class="px-4 py-2.5 bg-surface border-b border-neutral-200 text-xs font-semibold uppercase tracking-wider text-neutral-500">Data Extraction Report · черновик</div>
+      <div class="divide-y divide-neutral-100 text-sm">
+        ${paramRow('Модель выручки', 'Подписка: клиенты × ARPU', 'SOURCE', 'из описания')}
+        ${paramRow('ARPU', '12 000 ₽/мес', 'SOURCE', 'из описания')}
+        ${paramRow('Churn', '4% в месяц', 'SOURCE', 'из описания')}
+        ${paramRow('Новые клиенты', '25/мес, рост 10%/мес', 'ASSUMPTION', 'оценка ИИ')}
+        ${paramRow('Налоговый режим', '—', 'MISSING', 'нужен ответ')}
+      </div>
+    </div>
+    <p class="text-[15px] leading-relaxed text-neutral-700 mt-3">Не хватает одного параметра — <b>налоговый режим</b> (УСН 6%, УСН 15% или ОСНО). Могу пока принять УСН 6% как типичный для SaaS. Собирать модель?</p>
+    <div class="flex flex-wrap gap-2 mt-3">
+      <button onclick="buildModel(this)" class="rounded-xl bg-ink text-white text-sm font-medium px-4 py-2 hover:bg-neutral-800 active:scale-[.98] transition">Собрать модель</button>
+      <button onclick="editParams(this)" class="rounded-xl border border-neutral-300 text-sm font-medium px-4 py-2 hover:bg-neutral-50 transition">Поправить параметры</button>
+    </div>
+  `);
+  flowStep = 1;
+}
+
+function paramRow(name, value, status, note) {
+  const badge = {
+    SOURCE:     '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">SOURCE</span>',
+    ASSUMPTION: '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">ASSUMPTION</span>',
+    MISSING:    '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-600">MISSING</span>',
+  }[status];
+  return `<div class="flex items-center gap-3 px-4 py-2.5">
+    <div class="flex-1 min-w-0"><span class="font-medium">${name}</span> <span class="text-neutral-400">· ${value}</span></div>
+    ${badge}<span class="hidden sm:inline text-xs text-neutral-400 w-24 text-right">${note}</span>
+  </div>`;
+}
+
+function editParams(btn) {
+  btn.closest('.flex-1').querySelectorAll('button').forEach(b => b.disabled = true);
+  assistantShell(`<p class="text-[15px] text-neutral-700 leading-relaxed">В боевой версии здесь открывается редактируемая таблица параметров — значение, источник и confidence по каждой строке. В прототипе просто нажмите «Собрать модель» в сообщении выше… хотя он уже заблокирован — напишите «собери модель» в чат 🙂</p>`);
+  flowStep = 2;
+}
+
+async function runGenericReply(text) {
+  const t = addTyping();
+  await sleep(1200);
+  if (/собер|модел|стро/i.test(text)) { replaceMsg(t, ''); document.getElementById(t).remove(); return buildModel(null); }
+  replaceMsg(t, `<p class="text-[15px] text-neutral-700 leading-relaxed">Зафиксировал уточнение: «${escapeHtml(text)}». Оно попадёт в Model Spec. Когда будете готовы — напишите «собери модель», и я сгенерирую Excel-файл.</p>`);
+}
+
+/* ---------- build model ---------- */
+async function buildModel(btn) {
+  if (btn) btn.closest('.flex-wrap').querySelectorAll('button').forEach(b => { b.disabled = true; b.classList.add('opacity-40'); });
+
+  const steps = [
+    'Выбираю revenue engine: Customers × ARPU + churn…',
+    'Строю листы: Assumptions, Revenue, OPEX, DCF…',
+    'Проставляю формулы и cross-sheet ссылки…',
+    'QA: пересчёт NPV/IRR вторым методом…',
+  ];
+
+  const id = assistantShell(`
+    <div class="rounded-2xl border border-neutral-200 p-4">
+      <div class="flex items-center gap-2 text-sm font-medium"><span class="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span><span id="buildStep">${steps[0]}</span></div>
+      <div class="mt-3 h-1.5 rounded-full bg-neutral-100 overflow-hidden"><div id="buildBar" class="progress-bar-fill h-full w-[5%] rounded-full bg-ink"></div></div>
+    </div>`);
+
+  for (let i = 0; i < steps.length; i++) {
+    await sleep(1100);
+    const s = document.getElementById('buildStep'); if (s) s.textContent = steps[i];
+    const b = document.getElementById('buildBar');  if (b) b.style.width = (8 + (i+1)/steps.length*88) + '%';
+  }
+  await sleep(600);
+
+  const { url, size } = generateXlsx();
+
+  replaceMsg(id, `
+    <p class="text-[15px] text-neutral-700 leading-relaxed mb-3">Готово. Собрал финансовую модель — 6 листов, формулы живые, допущения на отдельном листе Assumptions.</p>
+    <div class="rounded-2xl border border-neutral-200 bg-white p-4 flex items-center gap-3.5 shadow-sm hover:shadow transition max-w-md">
+      <div class="w-11 h-11 shrink-0 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/></svg>
+      </div>
+      <div class="min-w-0 flex-1">
+        <div class="text-sm font-semibold truncate">FinModel_SaaS_v1.xlsx</div>
+        <div class="text-xs text-neutral-400 mt-0.5">${fmtSize(size)} · Excel · создан только что</div>
+      </div>
+      <a href="${url}" download="FinModel_SaaS_v1.xlsx"
+         class="shrink-0 rounded-xl bg-ink text-white text-sm font-medium px-3.5 py-2 hover:bg-neutral-800 active:scale-95 transition flex items-center gap-1.5">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v10M7 11l5 5 5-5M5 21h14"/></svg>
+        Скачать
+      </a>
+    </div>
+    <div class="flex items-start gap-2 mt-3 text-[13px] text-neutral-500">
+      <svg class="shrink-0 mt-0.5" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+      <span><b class="text-neutral-700">QA-отчёт:</b> 14 проверок пройдено · ошибок формул нет · NPV, пересчитанный независимо, совпал с моделью (расхождение &lt; 0,1%).</span>
+    </div>
+    <p class="text-[15px] text-neutral-700 leading-relaxed mt-3">Хотите сценарий «что если»? Например: «подними churn до 7%» — пересоберу модель за секунды.</p>
+  `);
+  flowStep = 3;
+}
+
+/* ---------- real xlsx generation (SheetJS) ---------- */
+function generateXlsx() {
+  const wb = XLSX.utils.book_new();
+
+  const assumptions = [
+    ['FinModel AI — Assumptions', '', ''],
+    [],
+    ['Параметр', 'Значение', 'Статус'],
+    ['Модель выручки', 'Клиенты × ARPU', 'SOURCE'],
+    ['ARPU, ₽/мес', 12000, 'SOURCE'],
+    ['Churn, %/мес', 0.04, 'SOURCE'],
+    ['Новые клиентов, мес 1', 25, 'ASSUMPTION'],
+    ['Рост новых клиентов, %/мес', 0.10, 'ASSUMPTION'],
+    ['Налог (УСН), % выручки', 0.06, 'ASSUMPTION'],
+    ['OPEX фикс., ₽/мес', 450000, 'ASSUMPTION'],
+    ['Ставка дисконтирования, % год.', 0.25, 'ASSUMPTION'],
+  ];
+  const ws1 = XLSX.utils.aoa_to_sheet(assumptions);
+  ws1['!cols'] = [{wch:32},{wch:18},{wch:12}];
+  XLSX.utils.book_append_sheet(wb, ws1, 'Assumptions');
+
+  // Revenue + P&L, 12 months, with live formulas
+  const rows = [['Месяц', 'Новые клиенты', 'Активные клиенты', 'Выручка, ₽', 'OPEX, ₽', 'Налог, ₽', 'FCF, ₽']];
+  for (let m = 1; m <= 12; m++) {
+    const r = m + 1;
+    rows.push([
+      m,
+      m === 1 ? 25 : { f: `ROUND(B${r-1}*(1+Assumptions!B8),0)` },
+      m === 1 ? { f: `B${r}` } : { f: `ROUND(C${r-1}*(1-Assumptions!B6)+B${r},0)` },
+      { f: `C${r}*Assumptions!B5` },
+      { f: `Assumptions!B10` },
+      { f: `D${r}*Assumptions!B9` },
+      { f: `D${r}-E${r}-F${r}` },
+    ]);
+  }
+  rows.push([]);
+  rows.push(['NPV (диск. мес.), ₽', { f: `NPV(Assumptions!B11/12,G2:G13)` }]);
+  const ws2 = XLSX.utils.aoa_to_sheet(rows);
+  ws2['!cols'] = [{wch:8},{wch:14},{wch:16},{wch:14},{wch:12},{wch:12},{wch:14}];
+  XLSX.utils.book_append_sheet(wb, ws2, 'Model');
+
+  const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  return { url: URL.createObjectURL(blob), size: blob.size };
+}
+
+/* ================= misc ================= */
+function useSuggestion(btn) {
+  input.value = btn.querySelector('.text-xs').textContent + '. Помоги собрать финмодель на 3 года.';
+  autoResize(); input.focus();
+}
+function resetChat() { location.reload(); }
+autoResize();
+</script>
+</body>
+</html>
