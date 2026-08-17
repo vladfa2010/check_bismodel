@@ -293,6 +293,18 @@ def main() -> int:
             timeout=8000)
         check("файл удалён из колонки (и в корзину на сервере)", True)
 
+        # лимит 25 МБ: клиентский отказ с понятным тостом, загрузка не уходит
+        big = tempfile.NamedTemporaryFile("wb", suffix=".bin", delete=False)
+        big.write(b"x" * (26 * 1024 * 1024))
+        big.close()
+        page.set_input_files("#fileInput", big.name)
+        page.wait_for_selector("#toasts div", timeout=5000)
+        toast_txt = page.inner_text("#toasts")
+        check("файл >25 МБ: тост с причиной, без загрузки",
+              "25 МБ" in toast_txt and "не загружен" in toast_txt,
+              toast_txt[:70].replace("\n", " "))
+        os.unlink(big.name)
+
         # каскад: API — чат с файлом, удаляем чат → файл в корзине (не виден)
         r = page.request.post(f"{BASE}/api/chats", data="{}",
                               headers={"Content-Type": "application/json"})
