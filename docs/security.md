@@ -82,6 +82,9 @@
 | `MOONSHOT_API_KEY` | env / `deploy/.env` | сервер | на platform.moonshot.ai |
 | `MINIMAX_API_KEY` | env / `deploy/.env` | сервер | на platform.minimax.io |
 | `SESSION_SECRET` | env / `deploy/.env` (`openssl rand -hex 32`) | сервер | смена = разлогин всех |
+
+`deploy/.env` существует **только на сервере** — его не синхронизируют и не
+бэкапят в репо; rsync-деплой идёт по whitelist-путям (см. docs/deploy.md).
 | `SEED_USERS` (пароли) | env / `deploy/.env`, далее PBKDF2-хеши в БД | сервер | правка хеша в БД |
 | root-пароль VDS | вне репо | владелец | `passwd` на сервере |
 | GitHub PAT | вне репо | владелец | перевыпуск на github.com |
