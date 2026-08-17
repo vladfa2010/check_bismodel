@@ -15,11 +15,19 @@ deploy/               # VDS (Beget): docker-compose, Caddyfile, bootstrap скр
 render.yaml           # статический фолбэк-деплой на Render (только фронт)
 docs/
   architecture-kimi-api.md   # архитектура v2 под Kimi API
-  deploy-vds.md              # пошаговый деплой на VDS Beget
+  roadmap.md                 # срезы продукта и критерии готовности
+  data-model.md              # схема БД, инварианты, миграции, retention
   api.md                     # HTTP/SSE API, файлы, usage
+  llm-providers.md           # Kimi/MiniMax: контракт шлюза, quirks, добавление провайдера
+  prompts.md                 # промпты дословно + правила их изменения
+  frontend.md                # карта index.html, SSE-клиент, правила рендера
   deploy.md                  # паспорт прода и операции
+  deploy-vds.md              # пошаговый первый деплой на VDS Beget
+  runbook.md                 # что делать, когда горит
   tests.md                   # правила и реестр e2e-проверок
   security.md                # политика безопасности
+  privacy.md                 # что храним и куда отдаём (основа публичной политики)
+CONTRIBUTING.md   # правила разработки
 ```
 
 ## Локальный запуск
