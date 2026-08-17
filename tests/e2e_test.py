@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+"""E2E-тесты FinModel AI (Playwright + системный Chromium).
+
+Сценарии:
+  1) логин: неверный пароль → ошибка; верный → вход, юзер в сайдбаре
+  2) создание диалога: сообщение уходит, ответ ассистента стримится
+  3) загрузка файла: чип появляется, статус доходит до «готово»
+  4) получение результата: ответ с учётом файла + счётчик токенов вырос
+  5) разлогин → форма входа; логин вторым юзером; изоляция данных
+
+Запуск (сервер уже должен слушать BASE, MOCK_KIMI=1):
+  python tests/e2e_test.py
+Переменные: BASE (default http://127.0.0.1:8123)
+"""
+import os
+import sys
+import tempfile
+import time
+
+from playwright.sync_api import sync_playwright
+
+BASE = os.getenv("BASE", "http://127.0.0.1:8123")
+CHROMIUM = os.getenv("CHROMIUM", "/usr/bin/chromium")
+
+results = []
+
+
+def check(name: str, ok: bool, detail: str = "") -> None:
+    results.append((name, ok, detail))
+    print(f"  {'PASS' if ok else 'FAIL'}  {name}" + (f" — {detail}" if detail else ""), flush=True)
+
+
+def login(page, user: str, password: str) -> None:
+    page.goto(BASE, wait_until="networkidle")
+    page.wait_for_selector("#loginOverlay", state="visible", timeout=8000)
+    page.fill("#loginUser", user)
+    page.fill("#loginPass", password)
+    page.click("#loginOverlay button:has-text('Войти')")
+
+
+def main() -> int:
+    print(f"E2E против {BASE}\n", flush=True)
+
+    # тестовый документ
+    doc = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False)
+    doc.write("SaaS: 25 новых клиентов/мес, ARPU 12000 руб, churn 4%/мес.")
+    doc.close()
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROMIUM, headless=True,
+                                    args=["--no-sandbox"])
+        ctx = browser.new_context()
+        page = ctx.new_page()
+        page.set_default_timeout(15000)
+
+        # ===== 1. Логин =====
+        print("1) Логин", flush=True)
+        login(page, "vlad", "wrong-password")
+        page.wait_for_selector("#loginError", state="visible")
+        err = page.inner_text("#loginError")
+        check("неверный пароль → ошибка в форме", "Неверный логин" in err, err)
+
+        login(page, "vlad", "!1234567890")
+        page.wait_for_selector("#loginOverlay", state="hidden")
+        page.wait_for_selector("#sbUser")
+        who = page.inner_text("#sbUser")
+        check("верный пароль → вход, юзер в сайдбаре", who == "vlad", who)
+
+        # ===== 2. Создание диалога =====
+        print("2) Создание диалога", flush=True)
+        page.fill("#input", "Привет! Хочу финмодель для SaaS.")
+        page.press("#input", "Enter")
+        # ответ стримится в .streamText; в mock-режиме содержит маркер
+        page.wait_for_selector(".streamText", timeout=10000)
+        page.wait_for_function(
+            "() => [...document.querySelectorAll('.streamText')].some(e => e.textContent.length > 40)",
+            timeout=20000,
+        )
+        reply = page.inner_text(".streamText")
+        check("сообщение отправлено, ответ ассистента получен (стрим)", len(reply) > 40,
+              reply[:60] + "…")
+
+        # ===== 3. Загрузка файла =====
+        print("3) Загрузка файла", flush=True)
+        page.set_input_files("#fileInput", doc.name)
+        page.wait_for_selector("#attachChips > div")
+        page.wait_for_function(
+            "() => document.querySelector('#attachChips').textContent.includes('готово')",
+            timeout=30000,
+        )
+        chip = page.inner_text("#attachChips")
+        check("файл загружен, парсинг завершён («готово»)", "готово" in chip, chip.replace("\n", " "))
+
+        # ===== 4. Получение результата =====
+        print("4) Получение результата", flush=True)
+        usage_before = page.inner_text("#sbUsage")
+        page.fill("#input", "Учитывай мой документ в модели.")
+        page.press("#input", "Enter")
+        page.wait_for_function(
+            "() => document.querySelectorAll('.streamText').length >= 2",
+            timeout=10000,
+        )
+        page.wait_for_function(
+            "() => document.querySelectorAll('.streamText')[1].textContent.length > 40",
+            timeout=20000,
+        )
+        replies = page.eval_on_selector_all(".streamText", "els => els.map(e => e.textContent)")
+        check("второй ответ получен (результат диалога)", len(replies) >= 2 and len(replies[1]) > 40,
+              replies[-1][:60] + "…")
+        page.reload(wait_until="networkidle")
+        page.wait_for_selector("#sbUser")
+        time.sleep(1.5)  # loadUsage догружает /api/usage
+        usage_after = page.inner_text("#sbUsage")
+        check("счётчик токенов вырос после диалога",
+              usage_after != usage_before and "токенов" in usage_after,
+              f"{usage_before!r} → {usage_after!r}")
+
+        # файл сохранился на сервере у vlad
+        files = page.request.get(f"{BASE}/api/files").json()["files"]
+        check("файл vlad лежит в его хранилище на сервере", len(files) == 1,
+              files[0]["orig_name"] if files else "пусто")
+
+        # ===== 5. Логаут / логин / изоляция =====
+        print("5) Логаут / логин victor / изоляция", flush=True)
+        page.click("button[title='Выйти']")
+        page.wait_for_selector("#loginOverlay", state="visible")
+        check("разлогин → форма входа снова показана", True)
+
+        # API без сессии должен быть закрыт
+        r = page.request.get(f"{BASE}/api/files")
+        check("API без сессии → 401", r.status == 401, f"HTTP {r.status}")
+
+        login(page, "victor", "!1234567890")
+        page.wait_for_selector("#loginOverlay", state="hidden")
+        page.wait_for_selector("#sbUser")
+        who = page.inner_text("#sbUser")
+        check("victor входит", who == "victor", who)
+        files = page.request.get(f"{BASE}/api/files").json()["files"]
+        check("victor НЕ видит файлы vlad (изоляция)", len(files) == 0, f"files={len(files)}")
+
+        browser.close()
+
+    os.unlink(doc.name)
+    failed = [r for r in results if not r[1]]
+    print(f"\nИтог: {len(results) - len(failed)}/{len(results)} PASS", flush=True)
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
