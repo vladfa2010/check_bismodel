@@ -108,7 +108,11 @@ async def send_message(chat_id: str, request: Request):
     chat = await db.get_chat(uid, chat_id)
     if not chat:
         raise HTTPException(404, "Диалог не найден")
+    # Модель диалога могла стать недоступной (ключ выключен) — тогда default,
+    # иначе chat_stream уйдёт в mock-заглушку незаметно для юзера.
     model = chat["model"] or config.default_model()
+    if not config.model_spec(model):
+        model = config.default_model()
     await db.add_message(chat_id, "user", content, file_ids)
     await db.set_chat_title_if_new(chat_id, content)
 
