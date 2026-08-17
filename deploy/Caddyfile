@@ -1,6 +1,6 @@
 # Без домена: DOMAIN не задан → слушаем :80 по HTTP.
 # С доменом: DOMAIN=example.com в .env → Caddy сам выпустит Let's Encrypt (A-запись должна смотреть на сервер).
-{$DOMAIN::80} {
+(common) {
 	encode zstd gzip
 
 	# Всё проксируем в FastAPI: и статику, и /api (SSE-стриминг в том числе)
@@ -18,4 +18,14 @@
 		output stdout
 		format console
 	}
+}
+
+{$DOMAIN::80} {
+	import common
+}
+
+# Голый IP остаётся на plain HTTP (без редиректа на HTTPS — сертификат выдан домену).
+# После переезда на свой домен этот блок можно убрать.
+http://46.173.27.26 {
+	import common
 }
