@@ -7,6 +7,7 @@ from fastapi import File as FileParam
 
 from . import config, db, storage
 from .kimi import kimi
+from .routes_auth import require_user
 
 router = APIRouter()
 
@@ -24,7 +25,7 @@ async def parse_pipeline(fid: str, uid: str, path: str, filename: str) -> None:
 
 @router.post("/files")
 async def upload_file(request: Request, file: UploadFile = FileParam(...)):
-    uid = request.state.user_id
+    uid = require_user(request)["id"]
     data = await file.read()
     if not data:
         raise HTTPException(400, "Пустой файл")
@@ -43,12 +44,12 @@ async def upload_file(request: Request, file: UploadFile = FileParam(...)):
 
 @router.get("/files")
 async def list_files(request: Request):
-    return {"files": await db.list_files(request.state.user_id)}
+    return {"files": await db.list_files(require_user(request)["id"])}
 
 
 @router.get("/files/{fid}")
 async def file_status(fid: str, request: Request):
-    row = await db.get_file(fid, request.state.user_id)
+    row = await db.get_file(fid, require_user(request)["id"])
     if not row:
         raise HTTPException(404, "Файл не найден")
     return {"id": row["id"], "name": row["orig_name"], "size": row["size"],
@@ -57,9 +58,8 @@ async def file_status(fid: str, request: Request):
 
 @router.delete("/files/{fid}")
 async def delete_file(fid: str, request: Request):
-    row = await db.delete_file(fid, request.state.user_id)
+    """Мягкое удаление: файл уходит в корзину на TRASH_TTL_DAYS, чистит cleanup."""
+    row = await db.soft_delete_file(fid, require_user(request)["id"])
     if not row:
         raise HTTPException(404, "Файл не найден")
-    storage.remove_quiet(row["path"])
-    storage.remove_quiet(row["parsed_path"])
-    return {"ok": True}
+    return {"ok": True, "trash_ttl_days": config.TRASH_TTL_DAYS}

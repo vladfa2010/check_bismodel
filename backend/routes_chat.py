@@ -7,6 +7,7 @@ from fastapi.responses import StreamingResponse
 
 from . import config, db
 from .kimi import kimi
+from .routes_auth import require_user
 
 router = APIRouter()
 
@@ -32,7 +33,7 @@ async def send_message(chat_id: str, request: Request):
     if not content and not file_ids:
         raise HTTPException(400, "Пустое сообщение")
 
-    uid = request.state.user_id
+    uid = require_user(request)["id"]
     await db.get_or_create_chat(uid, chat_id)
     await db.add_message(chat_id, "user", content, file_ids)
 
@@ -58,12 +59,19 @@ async def send_message(chat_id: str, request: Request):
 
     async def event_stream():
         full: list[str] = []
+        usage: dict = {}
         try:
-            async for delta in kimi.chat_stream(messages):
-                full.append(delta)
-                yield "data: " + json.dumps({"type": "delta", "text": delta}, ensure_ascii=False) + "\n\n"
+            async for kind, payload in kimi.chat_stream(messages):
+                if kind == "delta":
+                    full.append(payload)
+                    yield "data: " + json.dumps(
+                        {"type": "delta", "text": payload}, ensure_ascii=False
+                    ) + "\n\n"
+                elif kind == "usage":
+                    usage = payload or {}
             await db.add_message(chat_id, "assistant", "".join(full), [])
-            yield 'data: {"type":"done"}\n\n'
+            await db.add_usage(uid, chat_id, "chat", config.KIMI_MODEL, usage)
+            yield "data: " + json.dumps({"type": "done", "usage": usage}) + "\n\n"
         except Exception as e:  # noqa: BLE001 — ошибку честно показываем в чате
             yield "data: " + json.dumps(
                 {"type": "error", "message": f"Ошибка генерации: {e}"}, ensure_ascii=False

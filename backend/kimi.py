@@ -70,20 +70,33 @@ class KimiGateway:
 
     # ---------- чат ----------
     async def chat_stream(self, messages: list[dict], json_mode: bool = False):
-        """Асинхронный генератор текстовых дельт (SSE-стрим Kimi → наружу)."""
+        """Асинхронный генератор событий: ("delta", текст) и в конце ("usage", dict).
+
+        Usage просим через stream_options.include_usage — это сырьё для
+        таблицы usage_events (учёт расхода токенов по юзерам).
+        """
         if self.mock:
             user_text = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
-            text = _mock_reply(user_text, [m for m in messages if "Документ «" in m.get("content", "")])
-            # имитация стриминга по словам
+            docs = [m for m in messages if "Документ «" in m.get("content", "")]
+            text = _mock_reply(user_text, docs)
+            in_tokens = sum(len(m.get("content", "")) // 3 for m in messages)
+            out_tokens = 0
             for word in text.split(" "):
                 await asyncio.sleep(0.03)
-                yield word + " "
+                out_tokens += 1
+                yield ("delta", word + " ")
+            yield ("usage", {
+                "prompt_tokens": in_tokens,
+                "completion_tokens": out_tokens,
+                "total_tokens": in_tokens + out_tokens,
+            })
             return
 
         payload = {
             "model": config.KIMI_MODEL,
             "messages": messages,
             "stream": True,
+            "stream_options": {"include_usage": True},
             "temperature": 0.3,
             "max_completion_tokens": 4096,
         }
@@ -105,22 +118,26 @@ class KimiGateway:
                         if resp.status_code != 200:
                             body = (await resp.aread()).decode(errors="replace")[:400]
                             raise RuntimeError(f"Kimi API {resp.status_code}: {body}")
+                        usage = None
                         async for line in resp.aiter_lines():
                             if not line.startswith("data:"):
                                 continue
                             data = line[5:].strip()
                             if data == "[DONE]":
-                                return
+                                break
                             try:
                                 chunk = json.loads(data)
                             except json.JSONDecodeError:
                                 continue
+                            if chunk.get("usage"):
+                                usage = chunk["usage"]
                             choices = chunk.get("choices") or []
                             if not choices:
                                 continue
                             delta = choices[0].get("delta") or {}
                             if delta.get("content"):
-                                yield delta["content"]
+                                yield ("delta", delta["content"])
+                        yield ("usage", usage or {})
                         return
             except (httpx.TransportError, httpx.TimeoutException) as e:
                 last_error = e

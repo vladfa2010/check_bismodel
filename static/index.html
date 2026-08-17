@@ -109,11 +109,15 @@
     </nav>
     <div class="p-3 border-t border-neutral-200/70">
       <div class="flex items-center gap-2.5 rounded-xl px-2 py-2">
-        <div class="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-violet-500 text-white flex items-center justify-center text-xs font-semibold">АК</div>
-        <div class="min-w-0">
-          <div class="text-sm font-medium truncate">Алексей К.</div>
-          <div class="text-xs text-neutral-400 truncate">Тариф: Founder</div>
+        <div id="sbAvatar" class="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-violet-500 text-white flex items-center justify-center text-xs font-semibold">?</div>
+        <div class="min-w-0 flex-1">
+          <div id="sbUser" class="text-sm font-medium truncate">Гость</div>
+          <div id="sbUsage" class="text-xs text-neutral-400 truncate">—</div>
         </div>
+        <button onclick="doLogout()" title="Выйти"
+          class="p-1.5 rounded-lg text-neutral-400 hover:bg-neutral-200/70 hover:text-neutral-600 transition">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+        </button>
       </div>
     </div>
   </aside>
@@ -263,12 +267,59 @@ document.getElementById('fileInput').addEventListener('change', e => {
   addFiles([...e.target.files]); e.target.value = '';
 });
 function addFiles(files) {
-  files.forEach(f => pendingFiles.push({ id: ++fileSeq, name: f.name, size: f.size, ext: extOf(f.name) }));
+  files.forEach(f => {
+    const rec = { id: ++fileSeq, name: f.name, size: f.size, ext: extOf(f.name),
+                  file: f, status: realMode ? 'uploading' : 'local', serverId: null };
+    pendingFiles.push(rec);
+    if (realMode) uploadToServer(rec);
+  });
   renderChips(); autoResize();
 }
 function removeFile(id) {
+  const rec = pendingFiles.find(f => f.id === id);
+  if (rec && rec.serverId) fetch(`/api/files/${rec.serverId}`, { method: 'DELETE' }).catch(() => {});
   pendingFiles = pendingFiles.filter(f => f.id !== id);
   renderChips(); autoResize();
+}
+
+/* --- загрузка файла на бэкенд и опрос статуса парсинга Kimi --- */
+async function uploadToServer(rec) {
+  try {
+    const fd = new FormData();
+    fd.append('file', rec.file, rec.name);
+    const r = await fetch('/api/files', { method: 'POST', body: fd });
+    if (r.status === 401) { showLogin(); rec.status = 'error'; renderChips(); return; }
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    rec.serverId = j.id;
+    rec.status = 'processing';
+    renderChips();
+    pollFileStatus(rec);
+  } catch (e) {
+    rec.status = 'error';
+    renderChips();
+  }
+}
+async function pollFileStatus(rec) {
+  for (let i = 0; i < 60; i++) {
+    await sleep(2000);
+    try {
+      const r = await fetch(`/api/files/${rec.serverId}`);
+      if (!r.ok) break;
+      const j = await r.json();
+      if (j.status === 'ready' || j.status === 'error') {
+        rec.status = j.status === 'ready' ? 'ready' : 'error';
+        renderChips();
+        return;
+      }
+    } catch { /* сеть мигнула — продолжаем опрос */ }
+  }
+  rec.status = 'ready';  // не дождались — не блокируем отправку, бэкенд разберётся
+  renderChips();
+}
+function chipStatus(f) {
+  return { local: '', uploading: ' · загрузка…', processing: ' · обработка ИИ…',
+           ready: ' · готово', error: ' · ошибка' }[f.status] || '';
 }
 function renderChips() {
   attachChips.innerHTML = pendingFiles.map(f => `
@@ -383,6 +434,7 @@ async function sendReal(text, files) {
         file_ids: files.filter(f => f.serverId).map(f => f.serverId),
       }),
     });
+    if (resp.status === 401) { showLogin(); document.getElementById(id).remove(); busy = false; return; }
     if (!resp.ok || !resp.body) throw new Error('HTTP ' + resp.status);
 
     const reader = resp.body.getReader();
@@ -416,6 +468,65 @@ async function sendReal(text, files) {
   busy = false;
 }
 
+/* ================= auth ================= */
+let currentUser = null;
+
+function showLogin() {
+  const o = document.getElementById('loginOverlay');
+  o.classList.remove('hidden'); o.classList.add('flex');
+}
+function hideLogin() {
+  const o = document.getElementById('loginOverlay');
+  o.classList.add('hidden'); o.classList.remove('flex');
+}
+
+async function doLogin(e) {
+  e.preventDefault();
+  const errEl = document.getElementById('loginError');
+  errEl.classList.add('hidden');
+  try {
+    const r = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: document.getElementById('loginUser').value.trim(),
+        password: document.getElementById('loginPass').value,
+      }),
+    });
+    if (r.ok) { location.reload(); return false; }
+    errEl.textContent = r.status === 401 ? 'Неверный логин или пароль' : 'Ошибка сервера, попробуйте ещё раз';
+  } catch {
+    errEl.textContent = 'Сервер недоступен';
+  }
+  errEl.classList.remove('hidden');
+  return false;
+}
+
+async function doLogout() {
+  await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+  location.reload();
+}
+
+async function loadMe() {
+  const r = await fetch('/api/auth/me');
+  if (!r.ok) { showLogin(); return; }
+  currentUser = await r.json();
+  document.getElementById('sbUser').textContent = currentUser.username;
+  document.getElementById('sbAvatar').textContent = currentUser.username.slice(0, 1).toUpperCase();
+  loadUsage();
+}
+
+async function loadUsage() {
+  try {
+    const r = await fetch('/api/usage');
+    if (!r.ok) return;
+    const j = await r.json();
+    const t = j.totals || { total: 0, requests: 0 };
+    document.getElementById('sbUsage').textContent =
+      `токенов: ${(t.total || 0).toLocaleString('ru-RU')} · запросов: ${t.requests || 0}`;
+  } catch { /* метрика не критична */ }
+}
+
 /* ================= определение режима: бэкенд или демо ================= */
 async function detectBackend() {
   const badge = document.getElementById('apiBadge');
@@ -439,6 +550,7 @@ async function detectBackend() {
       ping.className = ping.className.replace('bg-neutral-300', 'bg-amber-300');
       if (hint) hint.textContent = 'Бэкенд подключён, но ключа Kimi нет — ответы заглушка';
     }
+    await loadMe();
   } catch {
     realMode = false;
     badge.textContent = 'демо-режим · без бэкенда';

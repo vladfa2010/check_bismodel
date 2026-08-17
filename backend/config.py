@@ -1,4 +1,5 @@
 """Конфигурация FinModel AI. Всё через переменные окружения."""
+import json
 import os
 
 # --- хранилище ---
@@ -19,6 +20,18 @@ MOCK_KIMI = os.getenv("MOCK_KIMI", "").lower() in ("1", "true", "yes") or not MO
 SESSION_SECRET = os.getenv("SESSION_SECRET", "dev-secret-change-me-in-prod")
 COOKIE_NAME = "fm_uid"
 COOKIE_MAX_AGE = 60 * 60 * 24 * 365   # год
+
+# --- предустановленные пользователи (регистрация закрыта) ---
+# Формат env: SEED_USERS='{"vlad": "pass1", "victor": "pass2"}'
+SEED_USERS = json.loads(os.getenv("SEED_USERS", "")) if os.getenv("SEED_USERS") else {
+    "vlad": "!1234567890",
+    "victor": "!1234567890",
+}
+
+# --- retention ---
+TRASH_TTL_DAYS = 7        # корзина: файлы после удаления живут на диске 7 дней
+ANON_TTL_DAYS = 30        # анонимные юзеры без активности — под удаление
+CLEANUP_INTERVAL_SEC = 3600
 
 # --- контекст диалога ---
 HISTORY_LIMIT = 20              # последних реплик в контексте
