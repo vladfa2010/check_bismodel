@@ -1,0 +1,16 @@
+# Render Blueprint — статический прототип FinModel AI
+# Деплой: Render Dashboard → New → Blueprint → выбрать репозиторий check_bismodel
+services:
+  - type: web
+    name: finmodel-prototype
+    env: static
+    staticPublishPath: .     # index.html лежит в корне репозитория
+    pullRequestPreviewsEnabled: true
+    headers:
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html   # SPA-фолбэк: любой путь отдаёт чат
