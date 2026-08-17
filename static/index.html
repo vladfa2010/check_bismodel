@@ -491,6 +491,7 @@ async function sendReal(text, files) {
     }
     if (!bubble) startStreamBubble(id).textContent = '…';
     loadChats(true);  // обновить заголовок диалога в сайдбаре
+    loadUsage();      // и счётчики токенов
   } catch (e) {
     if (e.name !== 'AbortError') {
       replaceMsg(id, `<p class="text-[15px] text-red-600 leading-relaxed">Бэкенд не ответил (${escapeHtml(String(e.message || e))}). Проверьте сервер — или перезагрузите страницу.</p>`);
@@ -562,8 +563,16 @@ async function loadUsage() {
     if (!r.ok) return;
     const j = await r.json();
     const t = j.totals || { total: 0, requests: 0 };
-    document.getElementById('sbUsage').textContent =
-      `токенов: ${(t.total || 0).toLocaleString('ru-RU')} · запросов: ${t.requests || 0}`;
+    const el = document.getElementById('sbUsage');
+    const fmt = n => (n || 0).toLocaleString('ru-RU');
+    let text = `токенов: ${fmt(t.total)} · запросов: ${t.requests || 0}`;
+    const bm = j.by_model || [];
+    if (bm.length > 1) {
+      const title = id => (modelsList.find(m => m.id === id) || {}).title || id;
+      text += '\n' + bm.map(m => `${title(m.model)}: ${fmt(m.total)}`).join('  ·  ');
+      el.style.whiteSpace = 'pre-line';
+    }
+    el.textContent = text;
   } catch { /* метрика не критична */ }
 }
 

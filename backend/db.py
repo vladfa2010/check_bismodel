@@ -346,7 +346,15 @@ async def usage_summary(uid: str, days: int = 30) -> dict:
         " GROUP BY day ORDER BY day DESC",
         (uid, _now() - days * 86400),
     )
-    return {"totals": totals[0], "by_day": by_day}
+    by_model = await _fetch(
+        "SELECT model, COUNT(*) AS requests, COALESCE(SUM(prompt_tokens),0) AS prompt,"
+        " COALESCE(SUM(completion_tokens),0) AS completion,"
+        " COALESCE(SUM(total_tokens),0) AS total"
+        " FROM usage_events WHERE user_id = ?"
+        " GROUP BY model ORDER BY total DESC",
+        (uid,),
+    )
+    return {"totals": totals[0], "by_day": by_day, "by_model": by_model}
 
 
 # ---------- retention: чистильщик ----------

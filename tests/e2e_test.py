@@ -13,6 +13,7 @@
 Переменные: BASE (default http://127.0.0.1:8123)
 """
 import os
+import re
 import sys
 import tempfile
 import time
@@ -107,12 +108,19 @@ def main() -> int:
         replies = page.eval_on_selector_all(".streamText", "els => els.map(e => e.textContent)")
         check("второй ответ получен (результат диалога)", len(replies) >= 2 and len(replies[1]) > 40,
               replies[-1][:60] + "…")
+        # ждём обновления счётчика после стрима — сигнал, что usage записан в БД
+        req = lambda s: int(re.search(r"запросов: (\d+)", s).group(1))
+        expected = req(usage_before) + 1
+        page.wait_for_function(
+            f"document.querySelector('#sbUsage').textContent.includes('запросов: {expected}')",
+            timeout=15000,
+        )
         page.reload(wait_until="networkidle")
         page.wait_for_selector("#sbUser")
         time.sleep(1.5)  # loadUsage догружает /api/usage
         usage_after = page.inner_text("#sbUsage")
         check("счётчик токенов вырос после диалога",
-              usage_after != usage_before and "токенов" in usage_after,
+              req(usage_after) == expected,
               f"{usage_before!r} → {usage_after!r}")
 
         # файл сохранился на сервере у vlad
