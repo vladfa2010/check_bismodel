@@ -97,7 +97,7 @@ class KimiGateway:
             "messages": messages,
             "stream": True,
             "stream_options": {"include_usage": True},
-            "temperature": 0.3,
+            # kimi-k3 принимает только temperature=1 — поле не передаём вовсе
             "max_completion_tokens": 4096,
         }
         if json_mode:
